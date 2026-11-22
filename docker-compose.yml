@@ -1,0 +1,21 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: datalyst-postgres
+    environment:
+      POSTGRES_USER: datalyst_admin
+      POSTGRES_PASSWORD: datalyst_admin
+      POSTGRES_DB: shop
+    ports:
+      - "5433:5432"
+    volumes:
+      - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U datalyst_admin -d shop"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  postgres-data:
