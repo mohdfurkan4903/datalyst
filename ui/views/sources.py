@@ -52,7 +52,10 @@ def _manage(source: dict) -> None:
     metrics[2].metric("Failed jobs", jobs.get("failed", 0))
     metrics[3].metric("Workers running", len(status.get("workers", [])))
     if not status.get("workers"):
-        st.warning("No sync worker is running. Start one with: datalyst worker")
+        st.warning(
+            "No sync worker is running, so schema changes and descriptions are not "
+            "picked up. Check that the worker service is running."
+        )
 
     actions = st.columns(3)
     if actions[0].button("Check for schema changes", width="stretch"):

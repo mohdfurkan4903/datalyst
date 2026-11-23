@@ -36,6 +36,18 @@ class DatalystClient:
         self.token = data["access_token"]
         return data
 
+    def setup_status(self) -> dict:
+        return self._call("GET", "/api/auth/setup")
+
+    def set_up(self, email: str, password: str, name: str) -> dict:
+        data = self._call(
+            "POST",
+            "/api/auth/setup",
+            json={"email": email, "password": password, "name": name},
+        )
+        self.token = data["access_token"]
+        return data
+
     def me(self) -> dict:
         return self._call("GET", "/api/auth/me")
 
@@ -207,7 +219,25 @@ class DatalystClient:
     def usage(self, days: int = 30) -> list[dict]:
         return self._call("GET", "/api/usage", params={"days": days})
 
-    def _call(self, method: str, path: str, **kwargs: Any) -> Any:
+    def settings(self) -> list[dict]:
+        return self._call("GET", "/api/settings")
+
+    def update_settings(
+        self, values: dict[str, Any], reset: list[str] | None = None
+    ) -> list[dict]:
+        return self._call(
+            "PUT", "/api/settings", json={"values": values, "reset": reset or []}
+        )
+
+    def export_settings(self, fmt: str = "ini") -> str:
+        return self._call(
+            "GET", "/api/settings/export", params={"format": fmt}, text=True
+        )
+
+    def test_settings(self, target: str) -> dict:
+        return self._call("POST", "/api/settings/test", json={"target": target})
+
+    def _call(self, method: str, path: str, text: bool = False, **kwargs: Any) -> Any:
         headers = {"Authorization": f"Bearer {self.token}"} if self.token else {}
         try:
             response = self._http.request(method, path, headers=headers, **kwargs)
@@ -215,6 +245,8 @@ class DatalystClient:
             raise ApiError(0, f"Cannot reach the Datalyst API: {e}") from e
         if response.status_code >= 400:
             raise ApiError(response.status_code, _message(response))
+        if text:
+            return response.text
         if response.status_code == 204 or not response.content:
             return None
         return response.json()

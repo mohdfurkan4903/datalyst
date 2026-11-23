@@ -10,13 +10,15 @@ from ui.session import (
     client,
     current_user,
     is_admin,
+    needs_setup,
     restore_session,
+    set_up,
     sign_in,
     sign_out,
     signed_in,
     sync_cookie,
 )
-from ui.views import ask, catalog, history, knowledge, people, sources
+from ui.views import ask, catalog, history, knowledge, people, settings, sources
 
 st.set_page_config(page_title="Datalyst", page_icon="📊", layout="wide")
 restore_session()
@@ -37,6 +39,35 @@ def login_page() -> None:
                 except ApiError as e:
                     st.error(e.message)
                 else:
+                    st.rerun()
+
+
+def setup_page() -> None:
+    _, middle, _ = st.columns([1, 1.2, 1])
+    with middle:
+        st.title("Welcome to Datalyst")
+        st.caption(
+            "Create the first admin account. You will then choose the AI model and "
+            "connect your databases, all from this web interface."
+        )
+        with st.form("setup"):
+            name = st.text_input("Your name")
+            email = st.text_input("Email")
+            password = st.text_input("Password (10+ characters)", type="password")
+            again = st.text_input("Password again", type="password")
+            if st.form_submit_button(
+                "Create admin account", width="stretch", type="primary"
+            ):
+                if password != again:
+                    st.error("The passwords do not match.")
+                    return
+                try:
+                    set_up(email, password, name)
+                except ApiError as e:
+                    st.error(e.message)
+                else:
+                    st.session_state.welcome = True
+                    st.session_state.go_to_settings = True
                     st.rerun()
 
 
@@ -68,8 +99,14 @@ def account_page() -> None:
 
 
 if not signed_in():
+    first_run = needs_setup()
     st.navigation(
-        [st.Page(login_page, title="Sign in", icon="🔑")], position="hidden"
+        [
+            st.Page(setup_page, title="Set up", icon="🚀")
+            if first_run
+            else st.Page(login_page, title="Sign in", icon="🔑")
+        ],
+        position="hidden",
     ).run()
 else:
     pages = {
@@ -93,6 +130,9 @@ else:
             st.Page(
                 people.render, title="People & access", icon="👥", url_path="people"
             ),
+            settings_page := st.Page(
+                settings.render, title="Settings", icon="⚙️", url_path="settings"
+            ),
         ]
     pages["You"] = [
         st.Page(account_page, title="Account", icon="👤", url_path="account")
@@ -100,4 +140,7 @@ else:
     with st.sidebar:
         user = current_user()
         st.caption(f"Signed in as {user.get('email')}")
-    st.navigation(pages).run()
+    navigation = st.navigation(pages)
+    if st.session_state.pop("go_to_settings", False) and is_admin():
+        st.switch_page(settings_page)
+    navigation.run()

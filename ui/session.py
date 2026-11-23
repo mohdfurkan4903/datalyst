@@ -39,6 +39,20 @@ def sign_in(email: str, password: str) -> None:
     st.session_state.cookie = (data["access_token"], data["expires_in"])
 
 
+def set_up(email: str, password: str, name: str) -> None:
+    data = client().set_up(email, password, name)
+    st.session_state.user = data["user"]
+    st.session_state.admin = True
+    st.session_state.cookie = (data["access_token"], data["expires_in"])
+
+
+def needs_setup() -> bool:
+    try:
+        return bool(client().setup_status().get("needs_setup"))
+    except ApiError:
+        return False
+
+
 def sign_out() -> None:
     for key in list(st.session_state.keys()):
         del st.session_state[key]
