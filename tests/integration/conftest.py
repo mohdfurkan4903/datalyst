@@ -1,5 +1,14 @@
+"""Integration test fixtures.
+
+Everything runs on one Postgres (``docker compose up -d`` starts it). Each test
+session creates throwaway databases on it: a metastore, and the ``shop`` and
+``erp`` sample databases loaded from ``tests/fixtures``, each with a read-only
+login like the one a real installation would use.
+"""
+
 import os
 import uuid
+from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
 import psycopg
@@ -7,22 +16,94 @@ import pytest
 from psycopg import sql
 
 from datalyst.connectors.postgres import PostgresDataSource
-from datalyst.core.exceptions import QueryExecutionError
 from datalyst.metastore import Metastore
 from datalyst.security import SecretBox, generate_secret_key
 
-DEFAULT_URL = "postgresql://datalyst_ro:datalyst_ro@localhost:5433/shop"
+FIXTURES = Path(__file__).parents[1] / "fixtures"
+DEFAULT_ADMIN_URL = "postgresql://datalyst:datalyst@localhost:5434/datalyst"
+READ_ONLY_ROLE = "datalyst_test_ro"
+READ_ONLY_PASSWORD = "datalyst_test_ro"
 
 
 @pytest.fixture(scope="session")
-def database_url() -> str:
-    url = os.getenv("DATALYST_TEST_DATABASE_URL", DEFAULT_URL)
+def admin_url() -> str:
+    url = os.getenv("DATALYST_TEST_POSTGRES_URL", DEFAULT_ADMIN_URL)
     try:
-        with PostgresDataSource(url, pool_min_size=0, connect_timeout_seconds=2) as ds:
-            ds.execute("SELECT 1")
-    except (QueryExecutionError, psycopg.Error) as e:
+        with psycopg.connect(url, autocommit=True, connect_timeout=2) as conn:
+            conn.execute("SELECT 1")
+    except psycopg.Error as e:
         pytest.skip(f"Postgres not reachable at {url} ({e}). Run: docker compose up -d")
     return url
+
+
+def with_database(url: str, database: str, user: str | None = None) -> str:
+    parts = urlsplit(url)
+    netloc = parts.netloc
+    if user is not None:
+        netloc = f"{user}:{READ_ONLY_PASSWORD}@{parts.hostname}:{parts.port or 5432}"
+    return urlunsplit(parts._replace(path=f"/{database}", netloc=netloc))
+
+
+@pytest.fixture(scope="session")
+def temporary_database(admin_url):
+    created = []
+
+    def create(prefix: str, fixture: str | None = None) -> str:
+        name = f"datalyst_test_{prefix}_{uuid.uuid4().hex[:8]}"
+        with psycopg.connect(admin_url, autocommit=True) as conn:
+            conn.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(name)))
+        created.append(name)
+        url = with_database(admin_url, name)
+        if fixture:
+            with psycopg.connect(url, autocommit=True) as conn:
+                conn.execute((FIXTURES / fixture).read_text())
+                _grant_read_only(conn, name)
+        return url
+
+    yield create
+    with psycopg.connect(admin_url, autocommit=True) as conn:
+        for name in created:
+            conn.execute(
+                sql.SQL("DROP DATABASE IF EXISTS {} WITH (FORCE)").format(
+                    sql.Identifier(name)
+                )
+            )
+
+
+def _grant_read_only(conn: psycopg.Connection, database: str) -> None:
+    conn.execute(
+        sql.SQL(
+            "DO $$ BEGIN IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = {role}) "
+            "THEN CREATE ROLE {ident} LOGIN PASSWORD {password}; END IF; END $$"
+        ).format(
+            role=sql.Literal(READ_ONLY_ROLE),
+            ident=sql.Identifier(READ_ONLY_ROLE),
+            password=sql.Literal(READ_ONLY_PASSWORD),
+        )
+    )
+    role = sql.Identifier(READ_ONLY_ROLE)
+    for statement in (
+        "GRANT CONNECT ON DATABASE {db} TO {role}",
+        "GRANT USAGE ON SCHEMA public TO {role}",
+        "GRANT SELECT ON ALL TABLES IN SCHEMA public TO {role}",
+        "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO {role}",
+        "ALTER ROLE {role} SET default_transaction_read_only = on",
+    ):
+        conn.execute(sql.SQL(statement).format(db=sql.Identifier(database), role=role))
+    conn.execute("ANALYZE")
+
+
+@pytest.fixture(scope="session")
+def shop_owner_url(temporary_database) -> str:
+    return temporary_database("shop", "shop.sql")
+
+
+@pytest.fixture(scope="session")
+def database_url(shop_owner_url) -> str:
+    """Read-only login to the shop sample database."""
+    return with_database(
+        shop_owner_url, urlsplit(shop_owner_url).path.lstrip("/"), READ_ONLY_ROLE
+    )
 
 
 @pytest.fixture
@@ -31,27 +112,28 @@ def datasource(database_url):
         yield ds
 
 
-DEFAULT_METASTORE_URL = "postgresql://datalyst:datalyst@localhost:5434/datalyst"
+@pytest.fixture
+def shop_admin(shop_owner_url):
+    with psycopg.connect(shop_owner_url, autocommit=True) as conn:
+        yield conn
 
 
 @pytest.fixture(scope="session")
-def metastore_url():
-    admin_url = os.getenv("DATALYST_TEST_METASTORE_URL", DEFAULT_METASTORE_URL)
-    name = f"datalyst_test_{uuid.uuid4().hex[:8]}"
-    try:
-        with psycopg.connect(admin_url, autocommit=True, connect_timeout=2) as conn:
-            conn.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(name)))
-    except psycopg.Error as e:
-        pytest.skip(
-            f"Metastore not reachable at {admin_url} ({e}). Run: docker compose up -d"
-        )
-    yield conninfo_to_url(admin_url, name)
-    with psycopg.connect(admin_url, autocommit=True) as conn:
-        conn.execute(
-            sql.SQL("DROP DATABASE IF EXISTS {} WITH (FORCE)").format(
-                sql.Identifier(name)
-            )
-        )
+def warehouse_url(temporary_database) -> str:
+    """Read-only login to the messy ERP sample database."""
+    owner = temporary_database("erp", "erp.sql")
+    return with_database(owner, urlsplit(owner).path.lstrip("/"), READ_ONLY_ROLE)
+
+
+@pytest.fixture
+def warehouse(warehouse_url):
+    with PostgresDataSource(warehouse_url, timeout_seconds=10) as ds:
+        yield ds
+
+
+@pytest.fixture(scope="session")
+def metastore_url(temporary_database) -> str:
+    return temporary_database("meta")
 
 
 @pytest.fixture
@@ -60,43 +142,8 @@ def metastore(metastore_url):
         store.migrate()
         with store.pool.connection() as conn:
             conn.execute(
-                "TRUNCATE data_sources, sync_workers, users, groups, llm_usage RESTART IDENTITY CASCADE"
+                "TRUNCATE data_sources, sync_workers, users, groups, llm_usage, settings "
+                "RESTART IDENTITY CASCADE"
             )
+            conn.execute("UPDATE settings_version SET version = 0")
         yield store
-
-
-def conninfo_to_url(url: str, database: str) -> str:
-    parts = urlsplit(url)
-    return urlunsplit(parts._replace(path=f"/{database}"))
-
-
-DEFAULT_SHOP_ADMIN_URL = (
-    "postgresql://datalyst_admin:datalyst_admin@localhost:5433/shop"
-)
-DEFAULT_WAREHOUSE_URL = "postgresql://wh_ro:wh_ro@localhost:5435/erp"
-
-
-@pytest.fixture
-def shop_admin(database_url):
-    url = os.getenv("DATALYST_TEST_SHOP_ADMIN_URL", DEFAULT_SHOP_ADMIN_URL)
-    with psycopg.connect(url, autocommit=True) as conn:
-        yield conn
-
-
-@pytest.fixture(scope="session")
-def warehouse_url() -> str:
-    url = os.getenv("DATALYST_TEST_WAREHOUSE_URL", DEFAULT_WAREHOUSE_URL)
-    try:
-        with PostgresDataSource(url, pool_min_size=0, connect_timeout_seconds=2) as ds:
-            ds.execute("SELECT 1")
-    except (QueryExecutionError, psycopg.Error) as e:
-        pytest.skip(
-            f"Warehouse not reachable at {url} ({e}). Run: docker compose up -d"
-        )
-    return url
-
-
-@pytest.fixture
-def warehouse(warehouse_url):
-    with PostgresDataSource(warehouse_url, timeout_seconds=10) as ds:
-        yield ds

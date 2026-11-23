@@ -7,7 +7,7 @@ from datalyst.core.models import ColumnRef, TableRef
 
 pytestmark = pytest.mark.integration
 
-GROUND_TRUTH = Path(__file__).parents[2] / "docker" / "warehouse" / "relationships.yaml"
+GROUND_TRUTH = Path(__file__).parents[1] / "fixtures" / "erp_relationships.yaml"
 
 
 def column(text: str) -> ColumnRef:

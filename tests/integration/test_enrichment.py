@@ -23,7 +23,7 @@ from datalyst.sync import (
 
 pytestmark = pytest.mark.integration
 
-GROUND_TRUTH = Path(__file__).parents[2] / "docker" / "warehouse" / "relationships.yaml"
+GROUND_TRUTH = Path(__file__).parents[1] / "fixtures" / "erp_relationships.yaml"
 
 
 def edges(kind):
@@ -87,7 +87,7 @@ def test_inferred_relationships_match_ground_truth(profiled_warehouse):
 @pytest.fixture
 def shop_worker(metastore, metastore_url, database_url):
     source = metastore.sources.create("shop", "postgresql", database_url)
-    settings = Settings(_env_file=None, metastore_url=metastore_url)
+    settings = Settings()
     context = JobContext(
         metastore, DataSourceProvider(settings, metastore), infer_delay=timedelta(0)
     )

@@ -10,7 +10,7 @@ x-app: &app
     DATALYST_METASTORE_URL: ${DATALYST_METASTORE_URL:-postgresql://datalyst:${METASTORE_PASSWORD}@metastore:5432/datalyst}
   restart: unless-stopped
   depends_on:
-    bootstrap:
+    migrate:
       condition: service_completed_successfully
 
 services:
@@ -29,9 +29,9 @@ services:
       retries: 30
     restart: unless-stopped
 
-  bootstrap:
+  migrate:
     <<: *app
-    command: ["bootstrap"]
+    command: ["migrate"]
     restart: "no"
     healthcheck:
       disable: true
@@ -84,34 +84,6 @@ services:
       ui:
         condition: service_healthy
     restart: unless-stopped
-
-  demo-shop:
-    profiles: ["demo"]
-    image: postgres:16-alpine
-    environment:
-      POSTGRES_USER: datalyst_admin
-      POSTGRES_PASSWORD: datalyst_admin
-      POSTGRES_DB: shop
-    volumes:
-      - ../docker/postgres/init:/docker-entrypoint-initdb.d:ro
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U datalyst_admin -d shop"]
-      interval: 3s
-      retries: 30
-
-  demo-erp:
-    profiles: ["demo"]
-    image: postgres:16-alpine
-    environment:
-      POSTGRES_USER: wh_admin
-      POSTGRES_PASSWORD: wh_admin
-      POSTGRES_DB: erp
-    volumes:
-      - ../docker/warehouse/init:/docker-entrypoint-initdb.d:ro
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U wh_admin -d erp"]
-      interval: 3s
-      retries: 30
 
 volumes:
   metastore-data:
