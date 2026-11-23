@@ -68,3 +68,22 @@ def test_pool_recovers_after_failed_query(datasource):
     with pytest.raises(QueryExecutionError):
         datasource.execute("SELECT 1/0")
     assert datasource.execute("SELECT 1").rows == [[1]]
+
+
+def test_reads_descriptions_and_sample_values(datasource):
+    orders = datasource.get_schema().get_table("public.orders")
+    status = next(c for c in orders.columns if c.name == "status")
+
+    assert orders.description == "One row per checkout by a customer"
+    assert "revenue" in status.description
+    assert set(status.sample_values) == {"pending", "paid", "shipped", "cancelled"}
+    assert all(not c.sample_values for c in orders.columns if c.name != "status")
+
+
+def test_schema_without_sample_values(database_url):
+    from datalyst.connectors.postgres import PostgresDataSource
+
+    with PostgresDataSource(database_url, sample_values=False) as ds:
+        orders = ds.get_schema().get_table("public.orders")
+
+    assert all(not c.sample_values for c in orders.columns)

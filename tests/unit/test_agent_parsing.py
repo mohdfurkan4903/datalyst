@@ -1,7 +1,12 @@
 import pytest
 from langchain_core.messages import AIMessage
 
-from datalyst.agent.parsing import extract_query, extract_refusal, message_text
+from datalyst.agent.parsing import (
+    extract_query,
+    extract_refusal,
+    message_text,
+    parse_rewrite,
+)
 
 
 @pytest.mark.parametrize(
@@ -42,3 +47,25 @@ def test_extract_refusal():
 def test_extract_refusal_inside_code_block():
     text = "```sql\nCANNOT_ANSWER: read-only access only\n```"
     assert extract_refusal(text) == "read-only access only"
+
+
+def test_parse_rewrite():
+    rewrite = parse_rewrite(
+        "QUESTION: Total revenue per month\nTERMS: revenue, orders; amount\n, month"
+    )
+    assert rewrite.question == "Total revenue per month"
+    assert rewrite.terms == ["revenue", "orders", "amount"]
+
+
+def test_parse_rewrite_tolerates_markdown_and_case():
+    rewrite = parse_rewrite(
+        "**Question**: Clients by country\n- terms: client, country"
+    )
+    assert rewrite.question == "Clients by country"
+    assert rewrite.terms == ["client", "country"]
+
+
+def test_parse_rewrite_without_expected_format():
+    rewrite = parse_rewrite("I am not sure what you mean")
+    assert rewrite.question is None
+    assert rewrite.terms == []

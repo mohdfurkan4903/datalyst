@@ -1,36 +1,52 @@
-import threading
 import time
+from collections.abc import Callable
 
 from datalyst.agent import AnalystAgent
-from datalyst.agent.prompts import render_schema
+from datalyst.catalog import SchemaCatalog
+from datalyst.catalog.sqlrefs import catalog_problems
+from datalyst.core.exceptions import UnsafeQueryError
 from datalyst.core.interfaces import DataSource
-from datalyst.core.models import AnalysisResult, DataSchema
+from datalyst.core.models import AnalysisResult, DataSchema, QueryResult
+
+SchemaView = Callable[[DataSchema], DataSchema]
+
+
+def _everything(schema: DataSchema) -> DataSchema:
+    return schema
 
 
 class AnalystService:
-    def __init__(self, datasource: DataSource, agent: AnalystAgent) -> None:
+    def __init__(
+        self, datasource: DataSource, catalog: SchemaCatalog, agent: AnalystAgent
+    ) -> None:
         self._datasource = datasource
+        self._catalog = catalog
         self._agent = agent
-        self._schema: DataSchema | None = None
-        self._schema_lock = threading.Lock()
 
-    def schema(self, refresh: bool = False) -> DataSchema:
-        with self._schema_lock:
-            if self._schema is None or refresh:
-                self._schema = self._datasource.get_schema()
-            return self._schema
+    def schema(
+        self, refresh: bool = False, view: SchemaView = _everything
+    ) -> DataSchema:
+        return view(self._catalog.get(refresh=refresh))
 
-    def ask(self, question: str) -> AnalysisResult:
+    def ask(self, question: str, view: SchemaView = _everything) -> AnalysisResult:
         start = time.perf_counter()
-        state = self._agent.run(question, render_schema(self.schema()))
+        state = self._agent.run(question, view(self._catalog.get()))
         return AnalysisResult(
             question=question,
             query=state.get("query"),
             result=state.get("result"),
             error=state.get("error"),
             attempts=state.get("attempts", 0),
+            tables=state.get("tables", []),
+            rewritten_question=state.get("rewritten_question"),
             duration_ms=round((time.perf_counter() - start) * 1000, 2),
         )
+
+    def run_sql(self, sql: str, view: SchemaView = _everything) -> QueryResult:
+        query = self._datasource.validate(sql)
+        if problems := catalog_problems(query, view(self._catalog.get())):
+            raise UnsafeQueryError(" ".join(problems))
+        return self._datasource.execute(query)
 
     def close(self) -> None:
         self._datasource.close()

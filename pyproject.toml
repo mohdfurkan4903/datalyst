@@ -1,13 +1,16 @@
 [project]
 name = "datalyst"
 version = "0.1.0"
-description = "Add your description here"
+description = "Open-source AI data analyst: ask questions in plain English, get safe read-only SQL. Bring your own LLM."
 readme = "README.md"
 authors = [
     { name = "Mohd Furkan", email = "furkan4903@gmail.com" }
 ]
 requires-python = ">=3.12"
 dependencies = [
+    "argon2-cffi>=25.1.0",
+    "cryptography>=50.0.2",
+    "email-validator>=2.4.0",
     "fastapi>=0.165.0",
     "langchain>=1.5.2",
     "langchain-openai>=1.8.5",
@@ -20,6 +23,7 @@ dependencies = [
     "psycopg[binary]>=3.3.9",
     "pydantic>=2.14.4",
     "pydantic-settings>=2.16.3",
+    "pyjwt>=2.15.1",
     "pyyaml>=6.0.4",
     "rich>=15.0.0",
     "sqlglot>=30.33.0",
@@ -41,6 +45,7 @@ ollama = [
     "langchain-ollama>=1.1.0",
 ]
 ui = [
+    "httpx>=0.28.1",
     "plotly>=7.1.0",
     "streamlit>=1.67.0",
 ]
@@ -59,4 +64,5 @@ dev = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+addopts = "--import-mode=importlib"
 markers = ["integration: needs the Postgres from docker compose"]

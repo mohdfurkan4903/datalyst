@@ -20,3 +20,19 @@ class QueryExecutionError(DatalystError):
 
 class LLMError(DatalystError):
     pass
+
+
+class MetastoreError(DatalystError):
+    pass
+
+
+class NotFoundError(DatalystError):
+    pass
+
+
+class AuthenticationError(DatalystError):
+    pass
+
+
+class PermissionDeniedError(DatalystError):
+    pass

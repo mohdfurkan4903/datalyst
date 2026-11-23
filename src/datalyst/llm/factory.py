@@ -1,3 +1,4 @@
+import warnings
 from typing import Any
 
 from langchain.chat_models import init_chat_model
@@ -6,9 +7,12 @@ from langchain_core.language_models import BaseChatModel
 from datalyst.config import Settings
 from datalyst.core.exceptions import ConfigurationError
 
-OPENAI_COMPATIBLE_SERVERS = {
+warnings.filterwarnings("ignore", message=".*uses fixed sampling defaults.*")
+
+OPENAI_COMPATIBLE_SERVERS: dict[str, tuple[str, str | None]] = {
     "lmstudio": ("http://localhost:1234/v1", "lm-studio"),
     "vllm": ("http://localhost:8000/v1", "EMPTY"),
+    "groq": ("https://api.groq.com/openai/v1", None),
 }
 
 

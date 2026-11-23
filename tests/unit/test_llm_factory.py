@@ -9,7 +9,7 @@ from datalyst.llm import create_chat_model
 
 def settings(**overrides) -> Settings:
     return Settings(
-        _env_file=None, database_url="postgresql://localhost/db", **overrides
+        _env_file=None, metastore_url="postgresql://localhost/meta", **overrides
     )
 
 
@@ -26,6 +26,16 @@ def test_lmstudio_is_openai_compatible_with_local_defaults():
 
     assert isinstance(model, ChatOpenAI)
     assert model.openai_api_base == "http://localhost:1234/v1"
+
+
+def test_groq_uses_its_openai_compatible_endpoint():
+    model = create_chat_model(
+        settings(llm_provider="groq", llm_model="openai/gpt-oss-20b", llm_api_key="gsk")
+    )
+
+    assert isinstance(model, ChatOpenAI)
+    assert model.openai_api_base == "https://api.groq.com/openai/v1"
+    assert model.openai_api_key.get_secret_value() == "gsk"
 
 
 def test_custom_base_url_overrides_default():

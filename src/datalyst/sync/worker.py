@@ -1,0 +1,135 @@
+import logging
+import os
+import socket
+import threading
+import time
+import uuid
+from collections.abc import Mapping
+from datetime import timedelta
+
+from datalyst.core.exceptions import NotFoundError
+from datalyst.core.models import Job, JobStatus, SourceStatus
+from datalyst.metastore import Metastore
+from datalyst.sync.handlers import (
+    CHECK_SOURCE,
+    HANDLERS,
+    Handler,
+    JobContext,
+    check_source_request,
+)
+
+logger = logging.getLogger(__name__)
+
+
+class SyncWorker:
+    def __init__(
+        self,
+        context: JobContext,
+        handlers: Mapping[str, Handler] = HANDLERS,
+        *,
+        worker_id: str | None = None,
+        poll_interval: float = 2.0,
+        lease: timedelta = timedelta(minutes=15),
+        heartbeat_every: float = 10.0,
+        maintenance_every: float = 60.0,
+        keep_finished: timedelta = timedelta(days=7),
+    ) -> None:
+        self._context = context
+        self._handlers = dict(handlers)
+        self.worker_id = (
+            worker_id or f"{socket.gethostname()}-{os.getpid()}-{uuid.uuid4().hex[:6]}"
+        )
+        self._poll_interval = poll_interval
+        self._lease = lease
+        self._heartbeat_every = heartbeat_every
+        self._maintenance_every = maintenance_every
+        self._keep_finished = keep_finished
+        self._last_heartbeat = 0.0
+        self._last_maintenance = 0.0
+
+    @property
+    def metastore(self) -> Metastore:
+        return self._context.metastore
+
+    def run(self, stop: threading.Event) -> None:
+        logger.info("Sync worker %s started", self.worker_id)
+        try:
+            while not stop.is_set():
+                if not self.tick():
+                    stop.wait(self._poll_interval)
+        finally:
+            self.close()
+            logger.info("Sync worker %s stopped", self.worker_id)
+
+    def close(self) -> None:
+        self.metastore.jobs.remove_worker(self.worker_id)
+        self._context.datasources.close()
+
+    def tick(self) -> bool:
+        self._housekeeping()
+        job = self.metastore.jobs.claim(self.worker_id)
+        if job is None:
+            return False
+        self.process(job)
+        return True
+
+    def drain(self, limit: int = 1000) -> int:
+        processed = 0
+        while processed < limit and self.tick():
+            processed += 1
+        return processed
+
+    def schedule_due_sources(self) -> int:
+        due = self.metastore.sources.due_for_check()
+        return self.metastore.jobs.enqueue_many(check_source_request(s) for s in due)
+
+    def process(self, job: Job) -> None:
+        handler = self._handlers.get(job.kind)
+        started = time.perf_counter()
+        try:
+            if handler is None:
+                raise NotFoundError(f"No handler for job kind '{job.kind}'")
+            followups = handler(job, self._context)
+        except Exception as e:
+            logger.warning("Job %s %s raised", job.id, job.kind, exc_info=True)
+            self._handle_failure(job, e)
+            return
+        self.metastore.jobs.enqueue_many(followups)
+        self.metastore.jobs.complete(job.id)
+        logger.info(
+            "Job %s %s:%s done in %.0f ms, %d follow-up(s)",
+            job.id,
+            job.kind,
+            job.target or job.source_id,
+            (time.perf_counter() - started) * 1000,
+            len(followups),
+        )
+
+    def _handle_failure(self, job: Job, error: Exception) -> None:
+        message = f"{type(error).__name__}: {error}"
+        status = self.metastore.jobs.fail(job, message)
+        log = logger.error if status == JobStatus.FAILED else logger.warning
+        log(
+            "Job %s %s failed (attempt %d): %s", job.id, job.kind, job.attempts, message
+        )
+        if job.kind == CHECK_SOURCE:
+            try:
+                self.metastore.sources.set_status(
+                    job.source_id, SourceStatus.ERROR, message
+                )
+            except NotFoundError:
+                pass
+
+    def _housekeeping(self) -> None:
+        now = time.monotonic()
+        if now - self._last_heartbeat >= self._heartbeat_every:
+            self.metastore.jobs.heartbeat(
+                self.worker_id, socket.gethostname(), os.getpid()
+            )
+            self._last_heartbeat = now
+        self.schedule_due_sources()
+        if now - self._last_maintenance >= self._maintenance_every:
+            if recovered := self.metastore.jobs.recover_stale(self._lease):
+                logger.warning("Recovered %d job(s) from stopped workers", recovered)
+            self.metastore.jobs.purge(self._keep_finished)
+            self._last_maintenance = now

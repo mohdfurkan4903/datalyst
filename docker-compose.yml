@@ -17,5 +17,42 @@ services:
       timeout: 3s
       retries: 20
 
+  warehouse:
+    image: postgres:16-alpine
+    container_name: datalyst-warehouse
+    environment:
+      POSTGRES_USER: wh_admin
+      POSTGRES_PASSWORD: wh_admin
+      POSTGRES_DB: erp
+    ports:
+      - "5435:5432"
+    volumes:
+      - ./docker/warehouse/init:/docker-entrypoint-initdb.d:ro
+      - warehouse-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U wh_admin -d erp"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  metastore:
+    image: pgvector/pgvector:pg16
+    container_name: datalyst-metastore
+    environment:
+      POSTGRES_USER: datalyst
+      POSTGRES_PASSWORD: datalyst
+      POSTGRES_DB: datalyst
+    ports:
+      - "5434:5432"
+    volumes:
+      - metastore-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U datalyst -d datalyst"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+
 volumes:
   postgres-data:
+  metastore-data:
+  warehouse-data:
