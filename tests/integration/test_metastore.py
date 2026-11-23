@@ -60,19 +60,6 @@ def test_duplicate_and_invalid_names_are_rejected(metastore):
         add(metastore, name="Bad Name!")
 
 
-def test_resolve_by_name_or_single_source(metastore):
-    with pytest.raises(NotFoundError):
-        metastore.sources.resolve(None)
-
-    first = add(metastore)
-    assert metastore.sources.resolve(None) == first
-
-    add(metastore, name="crm")
-    with pytest.raises(ConfigurationError, match="crm, sales"):
-        metastore.sources.resolve(None)
-    assert metastore.sources.resolve("crm").name == "crm"
-
-
 def test_update_and_delete_source(metastore):
     source = add(metastore)
 
@@ -240,3 +227,14 @@ def test_schema_catalog_syncs_real_database_into_metastore(
     assert any(fk.references_table == "public.customers" for fk in orders.foreign_keys)
     assert schema == datasource.get_schema()
     assert not catalog.sync().changed
+
+
+def test_first_admin_is_created_once(metastore):
+    assert not metastore.users.exist()
+
+    admin = metastore.users.create_first_admin("first@example.com", "hash", "First")
+
+    assert admin.role.value == "admin"
+    assert metastore.users.exist()
+    with pytest.raises(ConfigurationError, match="already set up"):
+        metastore.users.create_first_admin("second@example.com", "hash")

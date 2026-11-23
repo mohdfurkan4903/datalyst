@@ -1,6 +1,13 @@
 from datalyst.services.analyst import AnalystService
 from datalyst.services.auth import AuthService
+from datalyst.services.configuration import ConfigService
 from datalyst.services.questions import QuestionService
 from datalyst.services.registry import AnalystRegistry
 
-__all__ = ["AnalystRegistry", "AnalystService", "AuthService", "QuestionService"]
+__all__ = [
+    "AnalystRegistry",
+    "AnalystService",
+    "AuthService",
+    "ConfigService",
+    "QuestionService",
+]

@@ -34,6 +34,17 @@ class AuthService:
         self._metastore.users.record_login(user.id, rehashed)
         return user, self._tokens.issue(user)
 
+    def needs_setup(self) -> bool:
+        return not self._metastore.users.exist()
+
+    def set_up(self, email: str, password: str, name: str = "") -> tuple[User, str]:
+        """Create the first admin on a new installation and sign them in."""
+        user = self._metastore.users.create_first_admin(
+            email, hash_password(password), name
+        )
+        self._metastore.users.record_login(user.id)
+        return user, self._tokens.issue(user)
+
     def authenticate(self, token: str) -> Principal:
         claims = self._tokens.verify(token)
         try:

@@ -18,7 +18,7 @@ pytestmark = pytest.mark.integration
 @pytest.fixture
 def shop(metastore, database_url, metastore_url):
     source = metastore.sources.create("shop", "postgresql", database_url)
-    settings = Settings(_env_file=None, metastore_url=metastore_url)
+    settings = Settings()
     context = JobContext(
         metastore, DataSourceProvider(settings, metastore), infer_delay=timedelta(0)
     )

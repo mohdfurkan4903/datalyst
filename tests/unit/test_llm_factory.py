@@ -8,9 +8,7 @@ from datalyst.llm import create_chat_model
 
 
 def settings(**overrides) -> Settings:
-    return Settings(
-        _env_file=None, metastore_url="postgresql://localhost/meta", **overrides
-    )
+    return Settings(**overrides)
 
 
 def test_openai_with_key():

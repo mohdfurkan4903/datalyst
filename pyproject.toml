@@ -15,17 +15,11 @@ dependencies = [
     "langchain>=1.5.2",
     "langchain-openai>=1.8.5",
     "langgraph>=1.2.24",
-    "opentelemetry-api>=1.45.2",
-    "opentelemetry-exporter-otlp-proto-http>=1.45.2",
-    "opentelemetry-instrumentation-fastapi>=0.66b2",
-    "opentelemetry-sdk>=1.45.2",
     "psycopg-pool>=3.3.3",
     "psycopg[binary]>=3.3.9",
     "pydantic>=2.14.4",
     "pydantic-settings>=2.16.3",
     "pyjwt>=2.15.1",
-    "pyyaml>=6.0.4",
-    "rich>=15.0.0",
     "sqlglot>=30.33.0",
     "typer>=0.29.2",
     "uvicorn[standard]>=0.54.0",
@@ -58,6 +52,7 @@ build-backend = "uv_build"
 dev = [
     "httpx>=0.28.1",
     "pytest>=9.2.0",
+    "pyyaml>=6.0.4",
     "ruff>=0.17.6",
 ]
 
@@ -65,4 +60,4 @@ dev = [
 testpaths = ["tests"]
 pythonpath = ["."]
 addopts = "--import-mode=importlib"
-markers = ["integration: needs the Postgres from docker compose"]
+markers = ["integration: needs the Postgres started by docker compose up -d"]

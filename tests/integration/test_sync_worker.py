@@ -22,7 +22,7 @@ def make_worker(metastore, metastore_url):
     workers = []
 
     def make(batch_size=200):
-        settings = Settings(_env_file=None, metastore_url=metastore_url)
+        settings = Settings()
         context = JobContext(
             metastore, DataSourceProvider(settings, metastore), batch_size
         )

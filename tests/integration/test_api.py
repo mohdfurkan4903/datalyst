@@ -4,11 +4,11 @@ from fastapi.testclient import TestClient
 from datalyst.agent import AnalystAgent
 from datalyst.api import build_services, create_app
 from datalyst.catalog import SchemaCatalog
-from datalyst.config import Settings
+from datalyst.config import BootSettings
 from datalyst.connectors import create_datasource
 from datalyst.core.models import Role
 from datalyst.security import generate_secret_key
-from datalyst.services import AnalystRegistry, AnalystService
+from datalyst.services import AnalystRegistry, AnalystService, ConfigService
 from datalyst.sync import SourceSynchronizer
 from tests.unit.fakes import RecordingLLM, sql_reply
 
@@ -33,15 +33,18 @@ def replies():
 
 
 @pytest.fixture
-def api(metastore, metastore_url, database_url, replies):
-    settings = Settings(
-        _env_file=None, metastore_url=metastore_url, secret_key=generate_secret_key()
-    )
+def config(metastore):
+    return ConfigService(metastore, environ={}, refresh_seconds=0)
+
+
+@pytest.fixture
+def api(metastore, config, database_url, replies):
+    boot = BootSettings(_env_file=None, secret_key=generate_secret_key())
 
     def factory(source):
         datasource = create_datasource(
             metastore.sources.connection_url(source.id),
-            settings,
+            config.current(),
             source.include_schemas,
         )
         synchronizer = SourceSynchronizer(
@@ -52,11 +55,11 @@ def api(metastore, metastore_url, database_url, replies):
             datasource, catalog, AnalystAgent(replies.llm, datasource)
         )
 
-    registry = AnalystRegistry(metastore, factory)
-    services = build_services(settings, metastore, registry)
+    registry = AnalystRegistry(metastore, factory, settings_version=config.version)
+    services = build_services(boot, metastore, config, registry)
     services.auth.create_user("admin@example.com", ADMIN_PASSWORD, "Ada", Role.ADMIN)
     services.auth.create_user("analyst@example.com", ANALYST_PASSWORD, "Ann")
-    with TestClient(create_app(settings, services)) as client:
+    with TestClient(create_app(services)) as client:
         client.database_url = database_url
         yield client
     registry.close()
@@ -393,3 +396,43 @@ def test_the_last_admin_is_protected(api, admin):
         json={"email": "new@example.com", "password": "short"},
     )
     assert created.status_code == 400
+
+
+def test_settings_are_admin_only(api, analyst):
+    assert api.get("/api/settings", headers=analyst).status_code == 403
+
+
+def test_admin_changes_settings_in_the_ui(api, admin):
+    response = api.put(
+        "/api/settings",
+        json={"values": {"llm.provider": "groq", "llm.api_key": "gsk-abc"}},
+        headers=admin,
+    )
+    assert response.status_code == 200, response.text
+    rows = {row["name"]: row for row in response.json()}
+    assert rows["llm.provider"]["value"] == "groq"
+    assert rows["llm.api_key"] == rows["llm.api_key"] | {"value": None, "is_set": True}
+
+    bad = api.put("/api/settings", json={"values": {"llm.colour": "x"}}, headers=admin)
+    assert bad.status_code == 400
+
+
+def test_config_export_hides_secrets(api, admin):
+    api.put("/api/settings", json={"values": {"llm.api_key": "gsk-abc"}}, headers=admin)
+
+    ini = api.get("/api/settings/export", headers=admin)
+    env = api.get("/api/settings/export?format=env", headers=admin)
+
+    assert ini.status_code == 200
+    assert "gsk-abc" not in ini.text and "gsk-abc" not in env.text
+    assert "[llm]" in ini.text and "secret_key = < hidden >" in ini.text
+    assert "attachment" in ini.headers["content-disposition"]
+
+
+def test_setup_is_closed_once_users_exist(api):
+    assert api.get("/api/auth/setup").json() == {"needs_setup": False}
+    response = api.post(
+        "/api/auth/setup",
+        json={"email": "intruder@example.com", "password": "long-enough-pass"},
+    )
+    assert response.status_code == 400

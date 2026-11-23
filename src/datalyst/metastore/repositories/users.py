@@ -4,6 +4,7 @@ from psycopg_pool import ConnectionPool
 from datalyst.core.exceptions import ConfigurationError, NotFoundError
 from datalyst.core.models import Group, Role, User
 
+SETUP_LOCK = 7_210_418_001
 _COLUMNS = "id, email, name, role, active, token_version, created_at, last_login_at"
 
 
@@ -25,6 +26,31 @@ class UserRepository:
                 ).fetchone()
         except psycopg.errors.UniqueViolation as e:
             raise ConfigurationError(f"A user with email {email} exists.") from e
+        return User(**row)
+
+    def exist(self) -> bool:
+        with self._pool.connection() as conn:
+            return conn.execute(
+                "SELECT EXISTS (SELECT 1 FROM users) AS found"
+            ).fetchone()["found"]
+
+    def create_first_admin(
+        self, email: str, password_hash: str, name: str = ""
+    ) -> User:
+        """Create the first admin; fails once any user exists, even under a race."""
+        with self._pool.connection() as conn, conn.transaction():
+            conn.execute("SELECT pg_advisory_xact_lock(%s)", (SETUP_LOCK,))
+            if conn.execute("SELECT EXISTS (SELECT 1 FROM users) AS found").fetchone()[
+                "found"
+            ]:
+                raise ConfigurationError("Datalyst is already set up; sign in instead.")
+            row = conn.execute(
+                f"""
+                INSERT INTO users (email, name, password_hash, role)
+                VALUES (%s, %s, %s, 'admin') RETURNING {_COLUMNS}
+                """,
+                (email.strip(), name.strip(), password_hash),
+            ).fetchone()
         return User(**row)
 
     def get(self, user_id: int) -> User:

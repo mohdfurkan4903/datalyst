@@ -156,7 +156,7 @@ def worker_for(metastore, metastore_url):
     workers = []
 
     def make(llm):
-        settings = Settings(_env_file=None, metastore_url=metastore_url)
+        settings = Settings()
         context = JobContext(
             metastore,
             DataSourceProvider(settings, metastore),

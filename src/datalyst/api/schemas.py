@@ -1,3 +1,5 @@
+from typing import Any, Literal
+
 from pydantic import BaseModel, EmailStr, Field
 
 from datalyst.core.models import LLMDataPolicy, Role, User
@@ -91,3 +93,18 @@ class GroupCreate(BaseModel):
 
 class GrantUpdate(BaseModel):
     table_patterns: list[str] | None = None
+
+
+class SetupRequest(BaseModel):
+    email: EmailStr
+    password: str
+    name: str = ""
+
+
+class SettingsUpdate(BaseModel):
+    values: dict[str, Any] = Field(default_factory=dict)
+    reset: list[str] = Field(default_factory=list)
+
+
+class ConnectionTest(BaseModel):
+    target: Literal["llm", "describe", "embeddings"] = "llm"

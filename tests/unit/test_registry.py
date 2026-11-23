@@ -22,6 +22,6 @@ def test_datasource_kind(url, kind):
 
 
 def test_unknown_scheme_is_rejected():
-    settings = Settings(_env_file=None, metastore_url="postgresql://localhost/meta")
+    settings = Settings()
     with pytest.raises(UnsupportedDataSourceError, match="mongodb"):
         create_datasource("mongodb://localhost/db", settings)

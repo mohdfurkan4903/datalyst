@@ -1,4 +1,5 @@
 import hashlib
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 
 import jwt
@@ -24,14 +25,16 @@ def signing_key(secret_key: str) -> str:
 
 class TokenService:
     def __init__(
-        self, secret_key: str, lifetime: timedelta = timedelta(hours=8)
+        self,
+        secret_key: str,
+        lifetime: timedelta | Callable[[], timedelta] = timedelta(hours=8),
     ) -> None:
         self._key = signing_key(secret_key)
         self._lifetime = lifetime
 
     @property
     def lifetime(self) -> timedelta:
-        return self._lifetime
+        return self._lifetime() if callable(self._lifetime) else self._lifetime
 
     def issue(self, user: User) -> str:
         now = datetime.now(UTC)
@@ -41,7 +44,7 @@ class TokenService:
                 "role": user.role.value,
                 "ver": user.token_version,
                 "iat": now,
-                "exp": now + self._lifetime,
+                "exp": now + self.lifetime,
                 "iss": ISSUER,
             },
             self._key,

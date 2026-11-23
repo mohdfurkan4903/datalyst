@@ -1,3 +1,4 @@
+import os
 import warnings
 from typing import Any
 
@@ -14,6 +15,11 @@ OPENAI_COMPATIBLE_SERVERS: dict[str, tuple[str, str | None]] = {
     "vllm": ("http://localhost:8000/v1", "EMPTY"),
     "groq": ("https://api.groq.com/openai/v1", None),
 }
+KEY_ENV_VARS = {
+    "openai": "OPENAI_API_KEY",
+    "anthropic": "ANTHROPIC_API_KEY",
+    "google_genai": "GOOGLE_API_KEY",
+}
 
 
 def create_chat_model(settings: Settings) -> BaseChatModel:
@@ -29,6 +35,7 @@ def create_chat_model(settings: Settings) -> BaseChatModel:
             api_key or default_key,
         )
 
+    _require_key(settings.llm_provider, provider, api_key, base_url)
     kwargs = _provider_kwargs(provider, settings)
     if api_key:
         kwargs["api_key"] = api_key
@@ -41,8 +48,22 @@ def create_chat_model(settings: Settings) -> BaseChatModel:
         raise ConfigurationError(
             f"LLM provider '{settings.llm_provider}' needs an extra package: {e}"
         ) from e
-    except ValueError as e:
+    except Exception as e:
         raise ConfigurationError(f"Invalid LLM configuration: {e}") from e
+
+
+def _require_key(
+    configured: str, provider: str, api_key: str | None, base_url: str | None
+) -> None:
+    variable = KEY_ENV_VARS.get(provider)
+    if api_key or variable is None or os.getenv(variable):
+        return
+    if provider == "openai" and base_url and configured.strip().lower() != "groq":
+        return
+    raise ConfigurationError(
+        f"No API key for the '{configured}' model. "
+        "An admin can add one on the Settings page."
+    )
 
 
 def _provider_kwargs(provider: str, settings: Settings) -> dict[str, Any]:

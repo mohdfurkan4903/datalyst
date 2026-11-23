@@ -4,7 +4,8 @@ import socket
 import threading
 import time
 import uuid
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from datetime import timedelta
 
 from datalyst.core.exceptions import NotFoundError
@@ -21,26 +22,35 @@ from datalyst.sync.handlers import (
 logger = logging.getLogger(__name__)
 
 
+@dataclass
+class WorkerSetup:
+    context: JobContext
+    poll_interval: float = 2.0
+    lease: timedelta = timedelta(minutes=15)
+
+
 class SyncWorker:
     def __init__(
         self,
-        context: JobContext,
+        setup: WorkerSetup | JobContext,
         handlers: Mapping[str, Handler] = HANDLERS,
         *,
         worker_id: str | None = None,
-        poll_interval: float = 2.0,
-        lease: timedelta = timedelta(minutes=15),
+        reconfigure: Callable[[], WorkerSetup | None] | None = None,
         heartbeat_every: float = 10.0,
         maintenance_every: float = 60.0,
         keep_finished: timedelta = timedelta(days=7),
     ) -> None:
-        self._context = context
+        if isinstance(setup, JobContext):
+            setup = WorkerSetup(setup)
+        self._context = setup.context
+        self._poll_interval = setup.poll_interval
+        self._lease = setup.lease
+        self._reconfigure = reconfigure
         self._handlers = dict(handlers)
         self.worker_id = (
             worker_id or f"{socket.gethostname()}-{os.getpid()}-{uuid.uuid4().hex[:6]}"
         )
-        self._poll_interval = poll_interval
-        self._lease = lease
         self._heartbeat_every = heartbeat_every
         self._maintenance_every = maintenance_every
         self._keep_finished = keep_finished
@@ -66,6 +76,7 @@ class SyncWorker:
         self._context.datasources.close()
 
     def tick(self) -> bool:
+        self._apply_new_settings()
         self._housekeeping()
         job = self.metastore.jobs.claim(self.worker_id)
         if job is None:
@@ -104,6 +115,23 @@ class SyncWorker:
             (time.perf_counter() - started) * 1000,
             len(followups),
         )
+
+    def _apply_new_settings(self) -> None:
+        if self._reconfigure is None:
+            return
+        try:
+            setup = self._reconfigure()
+        except Exception:
+            logger.exception("Could not apply new settings; keeping the current ones")
+            return
+        if setup is None:
+            return
+        old = self._context
+        self._context = setup.context
+        self._poll_interval = setup.poll_interval
+        self._lease = setup.lease
+        old.datasources.close()
+        logger.info("Worker %s picked up new settings", self.worker_id)
 
     def _handle_failure(self, job: Job, error: Exception) -> None:
         message = f"{type(error).__name__}: {error}"

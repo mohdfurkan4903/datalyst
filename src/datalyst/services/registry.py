@@ -10,9 +10,18 @@ ServiceFactory = Callable[[DataSourceInfo], AnalystService]
 
 
 class AnalystRegistry:
-    def __init__(self, metastore: Metastore, factory: ServiceFactory) -> None:
+    """One AnalystService per data source, rebuilt when its connection or the
+    settings change."""
+
+    def __init__(
+        self,
+        metastore: Metastore,
+        factory: ServiceFactory,
+        settings_version: Callable[[], int] = lambda: 0,
+    ) -> None:
         self._metastore = metastore
         self._factory = factory
+        self._settings_version = settings_version
         self._services: dict[int, tuple[str, AnalystService]] = {}
         self._lock = threading.Lock()
 
@@ -43,5 +52,8 @@ class AnalystRegistry:
 
     def _identity(self, source: DataSourceInfo) -> str:
         url = self._metastore.sources.connection_url(source.id)
-        text = f"{url}|{','.join(source.include_schemas)}|{source.llm_data_policy}"
+        text = (
+            f"{url}|{','.join(source.include_schemas)}|{source.llm_data_policy}"
+            f"|{self._settings_version()}"
+        )
         return hashlib.sha256(text.encode()).hexdigest()

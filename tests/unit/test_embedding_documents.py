@@ -67,9 +67,7 @@ def test_vector_literal():
 
 
 def settings(**overrides):
-    return Settings(
-        _env_file=None, metastore_url="postgresql://localhost/meta", **overrides
-    )
+    return Settings(**overrides)
 
 
 def test_embeddings_are_optional():
@@ -79,19 +77,21 @@ def test_embeddings_are_optional():
 
 def test_providers_without_embeddings_are_rejected():
     with pytest.raises(ConfigurationError, match="no embedding models"):
-        create_embeddings(settings(embedding_provider="groq", embedding_model="x"))
+        create_embeddings(settings(embeddings_provider="groq", embeddings_model="x"))
 
 
 def test_local_server_embeddings_use_openai_protocol():
     model = create_embeddings(
-        settings(embedding_provider="lmstudio", embedding_model="nomic-embed-text")
+        settings(embeddings_provider="lmstudio", embeddings_model="nomic-embed-text")
     )
 
     assert isinstance(model, OpenAIEmbeddings)
     assert model.openai_api_base == "http://localhost:1234/v1"
     assert (
         embedding_model_name(
-            settings(embedding_provider="LMStudio", embedding_model="nomic-embed-text")
+            settings(
+                embeddings_provider="LMStudio", embeddings_model="nomic-embed-text"
+            )
         )
         == "lmstudio:nomic-embed-text"
     )
@@ -104,8 +104,8 @@ def test_describe_settings_fall_back_to_main_model():
     split = settings(
         llm_provider="groq",
         llm_model="a",
-        describe_llm_provider="google_genai",
-        describe_llm_model="b",
+        describe_provider="google_genai",
+        describe_model="b",
     )
     assert (
         split.describe_settings().llm_provider,

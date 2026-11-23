@@ -11,6 +11,7 @@ from datalyst.metastore.repositories import (
     HistoryRepository,
     JobRepository,
     KnowledgeRepository,
+    SettingsRepository,
     SourceRepository,
     UsageRepository,
     UserRepository,
@@ -30,6 +31,7 @@ class Metastore:
         self.users = UserRepository(pool)
         self.groups = GroupRepository(pool)
         self.history = HistoryRepository(pool)
+        self.settings = SettingsRepository(pool, secrets)
 
     @classmethod
     def connect(

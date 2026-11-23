@@ -68,19 +68,6 @@ class SourceRepository:
     def get_by_name(self, name: str) -> DataSourceInfo:
         return self._one("name = %s", name)
 
-    def resolve(self, name: str | None) -> DataSourceInfo:
-        if name:
-            return self.get_by_name(name)
-        sources = self.all()
-        if len(sources) == 1:
-            return sources[0]
-        if not sources:
-            raise NotFoundError(
-                "No data sources yet. Add one with: datalyst source add"
-            )
-        names = ", ".join(source.name for source in sources)
-        raise ConfigurationError(f"Several data sources exist; pick one of: {names}")
-
     def connection_url(self, source_id: int) -> str:
         with self._pool.connection() as conn:
             row = conn.execute(

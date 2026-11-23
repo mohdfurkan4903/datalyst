@@ -86,5 +86,5 @@ def source_status(source_id: int, _: Admin, app: Services) -> dict:
 
 
 def _test_connection(app, url: str, include_schemas: list[str]) -> None:
-    with create_datasource(url, app.settings, include_schemas) as datasource:
+    with create_datasource(url, app.config.current(), include_schemas) as datasource:
         datasource.execute("SELECT 1")

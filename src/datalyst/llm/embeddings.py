@@ -12,28 +12,30 @@ NO_EMBEDDINGS = frozenset({"groq", "anthropic"})
 
 
 def embedding_model_name(settings: Settings) -> str | None:
-    if not settings.embedding_provider or not settings.embedding_model:
+    if not settings.embeddings_provider or not settings.embeddings_model:
         return None
-    return f"{settings.embedding_provider.strip().lower()}:{settings.embedding_model}"
+    return f"{settings.embeddings_provider.strip().lower()}:{settings.embeddings_model}"
 
 
 def create_embeddings(settings: Settings) -> Embeddings | None:
-    if not settings.embedding_provider:
+    if not settings.embeddings_provider:
         return None
-    provider = settings.embedding_provider.strip().lower()
+    provider = settings.embeddings_provider.strip().lower()
     if provider in NO_EMBEDDINGS:
         raise ConfigurationError(
             f"'{provider}' has no embedding models; pick another embedding provider."
         )
-    if not settings.embedding_model:
-        raise ConfigurationError("Set DATALYST_EMBEDDING_MODEL.")
+    if not settings.embeddings_model:
+        raise ConfigurationError(
+            "Choose an embedding model on the Settings page (embeddings.model)."
+        )
 
-    api_key = _secret(settings.embedding_api_key) or (
+    api_key = _secret(settings.embeddings_api_key) or (
         _secret(settings.llm_api_key)
         if provider == settings.llm_provider.strip().lower()
         else None
     )
-    base_url = settings.embedding_base_url or None
+    base_url = settings.embeddings_base_url or None
     kwargs: dict[str, Any] = {}
     if provider in OPENAI_COMPATIBLE_SERVERS:
         default_url, default_key = OPENAI_COMPATIBLE_SERVERS[provider]
@@ -49,12 +51,12 @@ def create_embeddings(settings: Settings) -> Embeddings | None:
         kwargs["base_url"] = base_url
 
     try:
-        return init_embeddings(settings.embedding_model, provider=provider, **kwargs)
+        return init_embeddings(settings.embeddings_model, provider=provider, **kwargs)
     except ImportError as e:
         raise ConfigurationError(
             f"Embedding provider '{provider}' needs an extra package: {e}"
         ) from e
-    except ValueError as e:
+    except Exception as e:
         raise ConfigurationError(f"Invalid embedding configuration: {e}") from e
 
 

@@ -47,9 +47,9 @@ def _create_postgres(
     return PostgresDataSource(
         url,
         timeout_seconds=settings.query_timeout_seconds,
-        max_rows=settings.max_rows,
+        max_rows=settings.query_max_rows,
         include_schemas=include_schemas,
-        sample_values=settings.schema_sample_values,
-        pool_min_size=settings.pool_min_size,
-        pool_max_size=settings.pool_max_size,
+        sample_values=settings.query_sample_values,
+        pool_min_size=settings.query_pool_min_size,
+        pool_max_size=settings.query_pool_max_size,
     )

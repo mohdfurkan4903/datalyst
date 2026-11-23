@@ -17,7 +17,7 @@ from datalyst.sync.handlers import (
     profile_table_request,
 )
 from datalyst.sync.synchronizer import CheckResult, SourceSynchronizer
-from datalyst.sync.worker import SyncWorker
+from datalyst.sync.worker import SyncWorker, WorkerSetup
 
 __all__ = [
     "CHECK_SOURCE",
@@ -33,6 +33,7 @@ __all__ = [
     "JobContext",
     "SourceSynchronizer",
     "SyncWorker",
+    "WorkerSetup",
     "check_source_request",
     "describe_source_request",
     "describe_table_request",

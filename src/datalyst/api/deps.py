@@ -4,20 +4,26 @@ from typing import Annotated
 from fastapi import Depends, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
-from datalyst.config import Settings
+from datalyst.config import BootSettings
 from datalyst.core.exceptions import AuthenticationError
 from datalyst.metastore import Metastore
 from datalyst.security import Principal
-from datalyst.services import AnalystRegistry, AuthService, QuestionService
+from datalyst.services import (
+    AnalystRegistry,
+    AuthService,
+    ConfigService,
+    QuestionService,
+)
 
 
 @dataclass
 class AppServices:
-    settings: Settings
     metastore: Metastore
+    config: ConfigService
     auth: AuthService
     registry: AnalystRegistry
     questions: QuestionService
+    boot: BootSettings | None = None
 
 
 _bearer = HTTPBearer(auto_error=False)
