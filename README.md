@@ -146,6 +146,27 @@ uv run datalyst group grant sales erp --tables "public.ord_*" --tables "public.c
 
 Main endpoints: `POST /api/auth/login`, `GET /api/sources`, `POST /api/sources/{id}/ask`, `POST /api/sources/{id}/query`, `GET /api/sources/{id}/tables`, `GET /api/history`, plus admin endpoints for sources, curation (`PUT .../tables/{table}/description`, `PATCH .../relationships/{id}`), glossary, examples, users, groups and usage.
 
+## Web UI
+
+A browser UI for analysts and admins, built with Streamlit. It talks only to the API, so every permission rule applies.
+
+```bash
+uv sync --extra ui
+```
+
+```bash
+DATALYST_UI_API_URL=http://localhost:8000 uv run streamlit run ui/app.py
+```
+
+- **Ask:** chat with a data source; each answer shows the result table, an automatic chart (line for time series, bar for categories, a single number as a metric), the SQL, and 👍/👎 feedback. Admins can save a good answer as a verified example. Results download as CSV.
+- **History:** your past questions with status, SQL and timing; rerun any SQL.
+- **Catalog:** search tables and columns; read what each one means. Admins edit descriptions (saved as human-approved), review AI text marked stale after schema changes, and reject, restore or add joins.
+- **Glossary & examples:** business terms and verified question/SQL pairs.
+- **Data sources** (admin): add a database (the connection is tested first), choose what data may be sent to the LLM, trigger checks and descriptions, see sync status and recent schema changes.
+- **People & access** (admin): users, roles, groups, per-source and per-table grants, LLM usage.
+
+Sign-in is kept in a `SameSite=Strict` cookie (marked `Secure` over HTTPS), so reloading a page keeps you signed in until the token expires.
+
 ## Configuration
 
 All settings are environment variables prefixed with `DATALYST_`, read from the environment or a `.env` file.
