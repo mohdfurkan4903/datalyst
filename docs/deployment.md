@@ -28,7 +28,7 @@ This guide runs Datalyst for an organization: a web UI and API behind HTTPS, a b
 
 | Service | Purpose | Scale |
 |---|---|---|
-| `bootstrap` | Applies metastore migrations and creates the first admin, then exits | runs once per start |
+| `migrate` | Applies metastore migrations, then exits | runs once per start |
 | `api` | REST API used by the UI and other clients | `API_WORKERS` processes per container; more containers behind the proxy |
 | `worker` | Background sync and enrichment jobs | `WORKER_REPLICAS`; workers share the job queue safely |
 | `ui` | Web interface | one or more containers |
@@ -41,10 +41,10 @@ All application services use the same image, built from the repository's `Docker
 
 - Docker with Compose v2.
 - 2 CPU cores and 4 GB RAM for a small team; the worker and API scale out horizontally.
-- An LLM: an API key for OpenAI, Anthropic, Google Gemini or Groq, or a local server (Ollama, LM Studio, vLLM) reachable from the containers.
+- An LLM: an API key for OpenAI, Anthropic, Google Gemini or Groq, or a local server (Ollama, LM Studio, vLLM) reachable from the containers. You enter it in the web UI after installing.
 - Network access from the Datalyst host to each database you connect.
 
-## Try it with demo data
+## Install
 
 From the repository root:
 
@@ -52,25 +52,37 @@ From the repository root:
 cp deploy/.env.example deploy/.env
 ```
 
-Fill in `deploy/.env`:
+`deploy/.env` holds only what is needed to start:
 
 1. `METASTORE_PASSWORD`: any long random value.
-2. `DATALYST_SECRET_KEY`: create one with `docker compose -f deploy/compose.yaml run --rm --no-deps bootstrap secret-key`.
-3. `DATALYST_BOOTSTRAP_ADMIN_EMAIL` and `DATALYST_BOOTSTRAP_ADMIN_PASSWORD` (at least 10 characters).
-4. Your LLM provider, model and key.
+2. `DATALYST_SECRET_KEY`: create one with `docker compose -f deploy/compose.yaml run --rm --no-deps migrate secret-key`.
 
-Start everything, including two demo databases:
+Start everything:
 
 ```bash
-docker compose -f deploy/compose.yaml --profile demo up -d --build
+docker compose -f deploy/compose.yaml up -d --build
 ```
 
-Open `http://localhost` (or the `HTTP_PORT` you set) and sign in as the bootstrap admin. Under **Data sources**, add:
+Open `http://localhost` (or the `HTTP_PORT` you set):
 
-- `postgresql://datalyst_ro:datalyst_ro@demo-shop:5432/shop`, a small, documented shop database.
-- `postgresql://wh_ro:wh_ro@demo-erp:5432/erp`, a messy 40-table ERP database with cryptic names, no comments and no declared foreign keys.
+1. **Create the admin account.** On a new installation the first page asks for it; it disappears once any user exists. Do this right after starting, before the address is shared.
+2. **Settings → Model:** choose the provider and model, add the API key and click **Test connection**. Optionally set a cheaper model for background descriptions and an embedding model.
+3. **Data sources:** add each database with a read-only login (below). Within a minute or two the worker syncs, profiles and links its tables; AI descriptions follow.
+4. **People & access:** create accounts and groups, and grant groups the sources and tables they need.
 
-Within a minute or two the worker syncs, profiles and links the tables; AI descriptions follow. Then ask questions on the **Ask** page.
+## Configuration
+
+Following the approach Apache Airflow takes, only two values come from the environment: `DATALYST_METASTORE_URL` (set by the compose file) and `DATALYST_SECRET_KEY`. Every other option is kept in the metastore and edited by admins on the **Settings** page. Changes reach all API and worker containers within a few seconds, without a restart. API keys are encrypted with `DATALYST_SECRET_KEY` and are never displayed again.
+
+To manage an option in code or a secret manager instead, add `DATALYST__<SECTION>__<KEY>` to `deploy/.env` (it is passed to every Datalyst container), for example `DATALYST__LLM__API_KEY=...`. An environment variable wins over the stored value and locks the option in the UI. Precedence: environment variable, then Settings page, then default.
+
+To see the effective configuration, use **Settings → Download config**, or:
+
+```bash
+docker compose -f deploy/compose.yaml exec api datalyst config list --include-sources
+```
+
+`datalyst config options` lists every option with its environment variable. Secrets are always shown as `< hidden >`.
 
 ## Production setup
 
@@ -90,10 +102,9 @@ Caddy obtains and renews a Let's Encrypt certificate automatically (ports 80 and
 
 | Variable | What it protects | Notes |
 |---|---|---|
-| `DATALYST_SECRET_KEY` | Encrypts stored connection URLs and signs sign-in tokens | Store it in your secret manager. If it is lost, every data source connection must be entered again and everyone signs in again. Changing it signs everyone out. |
+| `DATALYST_SECRET_KEY` | Encrypts stored connection URLs and API keys, and signs sign-in tokens | Store it in your secret manager. If it is lost, every connection and API key must be entered again and everyone signs in again. Changing it signs everyone out. |
 | `METASTORE_PASSWORD` | The bundled metastore | Only used by the bundled `metastore` service |
-| `DATALYST_BOOTSTRAP_ADMIN_PASSWORD` | First admin | Used only while no users exist. Remove it from `deploy/.env` after the first start and change the password in the UI. |
-| LLM and embedding keys | Provider access | Give Datalyst its own keys so usage can be tracked and revoked |
+| LLM and embedding keys | Provider access | Entered on the Settings page and stored encrypted. Give Datalyst its own keys so usage can be tracked and revoked |
 
 `deploy/.env` is ignored by git. Keep it readable only by the deploying user (`chmod 600 deploy/.env`).
 
@@ -103,7 +114,7 @@ Caddy obtains and renews a Let's Encrypt certificate automatically (ports 80 and
 docker compose -f deploy/compose.yaml up -d --build
 ```
 
-`bootstrap` runs migrations and creates the first admin; `api`, `worker` and `ui` start after it succeeds. Check the state:
+`migrate` applies migrations; `api`, `worker` and `ui` start after it succeeds. Check the state:
 
 ```bash
 docker compose -f deploy/compose.yaml ps
@@ -137,7 +148,7 @@ Questions themselves always send the relevant tables' structure, descriptions an
 
 ### 5. People and access
 
-- Admins create users under **People & access** (or `datalyst user create`).
+- Admins create users under **People & access**. If nobody can sign in, run `docker compose -f deploy/compose.yaml exec api datalyst reset-password <email>`.
 - Analysts see only data sources granted to one of their groups, optionally limited to table patterns such as `public.ord_*`. Hidden tables are removed before anything reaches the LLM.
 - Changing a password, a role, or deactivating a user ends their sessions immediately.
 
@@ -149,7 +160,7 @@ Any Postgres 15+ with the `vector` and `pg_trgm` extensions works (Amazon RDS, C
 DATALYST_METASTORE_URL=postgresql://datalyst:<password>@your-host:5432/datalyst?sslmode=require
 ```
 
-and remove the `metastore` service and the `bootstrap` service's `depends_on: metastore` from `deploy/compose.yaml` (or override them in a `compose.override.yaml`).
+and remove the `metastore` service and the `migrate` service's `depends_on: metastore` from `deploy/compose.yaml` (or override them in a `compose.override.yaml`).
 
 ## Scaling
 
@@ -167,11 +178,11 @@ git pull
 docker compose -f deploy/compose.yaml up -d --build
 ```
 
-`bootstrap` applies any new migrations before the API and worker restart. Migrations run inside one transaction under an advisory lock, so a failed migration leaves the metastore unchanged and two starting stacks cannot apply the same migration twice. Back up first (below).
+`migrate` applies any new migrations before the API and worker restart. Migrations run inside one transaction under an advisory lock, so a failed migration leaves the metastore unchanged and two starting stacks cannot apply the same migration twice. Back up first (below).
 
 ## Backups
 
-Everything Datalyst knows (sources, encrypted connections, catalogs, descriptions written by people, glossary, examples, users, history) lives in the metastore. Back it up together with `DATALYST_SECRET_KEY`:
+Everything Datalyst knows (settings, encrypted connections and API keys, catalogs, descriptions written by people, glossary, examples, users, history) lives in the metastore. Back it up together with `DATALYST_SECRET_KEY`:
 
 ```bash
 docker compose -f deploy/compose.yaml exec -T metastore pg_dump -U datalyst -Fc datalyst > datalyst-$(date +%F).dump
@@ -183,7 +194,7 @@ Restore into an empty metastore:
 docker compose -f deploy/compose.yaml exec -T metastore pg_restore -U datalyst -d datalyst --clean --if-exists < datalyst-2026-01-31.dump
 ```
 
-A metastore restored without the matching secret key cannot decrypt connection URLs; re-enter them under **Data sources**.
+A metastore restored without the matching secret key cannot decrypt connection URLs or API keys; re-enter them under **Data sources** and **Settings**.
 
 ## Monitoring
 
@@ -192,8 +203,8 @@ A metastore restored without the matching secret key cannot decrypt connection U
 | API liveness | `GET /health` |
 | API readiness (metastore reachable, migrations applied) | `GET /ready` (503 when not ready) |
 | UI | `GET /_stcore/health` on the ui container |
-| Worker | **Data sources** page shows running workers, queued and failed jobs, and recent schema changes; or `datalyst source status <name>` |
-| LLM spend | **People & access → LLM usage**, or `datalyst usage` |
+| Worker | **Data sources** page shows running workers, queued and failed jobs, and recent schema changes |
+| LLM spend | **People & access → LLM usage** |
 | Logs | `docker compose -f deploy/compose.yaml logs -f api worker`; every API request is logged with status, duration and an `x-request-id` |
 
 Containers have health checks; `docker compose ps` shows them.
@@ -204,7 +215,7 @@ Containers have health checks; `docker compose ps` shows them.
 - [ ] `DATALYST_SECRET_KEY` stored in a secret manager; `deploy/.env` readable only by the deploying user.
 - [ ] Every data source uses a read-only database account with `SELECT` only on what people may query.
 - [ ] LLM data policy chosen per source; a self-hosted model if data must not leave the network.
-- [ ] Bootstrap admin password removed from `deploy/.env` after first start and changed in the UI.
+- [ ] Admin account created right after the first start, before the address was shared.
 - [ ] Analysts placed in groups with only the sources and tables they need.
 - [ ] Metastore backups scheduled and a restore tested.
 - [ ] The API and UI ports are not exposed directly; only the proxy is published.
@@ -212,10 +223,10 @@ Containers have health checks; `docker compose ps` shows them.
 
 ## Running without Docker
 
-Install with `uv sync --frozen --no-dev --all-extras`, export the same `DATALYST_*` variables (or put them in `.env` in the working directory), and run each process under your service manager (systemd, supervisord):
+Install with `uv sync --frozen --no-dev --all-extras`, export `DATALYST_METASTORE_URL` and `DATALYST_SECRET_KEY` (or put them in `.env` in the working directory), and run each process under your service manager (systemd, supervisord):
 
 ```bash
-datalyst bootstrap
+datalyst migrate
 ```
 
 ```bash
@@ -236,10 +247,12 @@ Put a reverse proxy with HTTPS in front, routing `/api/*`, `/health` and `/ready
 
 | Symptom | Cause and fix |
 |---|---|
-| `bootstrap` exits with "password authentication failed" | The metastore volume was created earlier with a different `METASTORE_PASSWORD`. Use the original password, or remove the volume to start fresh (this deletes all Datalyst data). |
+| `migrate` exits with "password authentication failed" | The metastore volume was created earlier with a different `METASTORE_PASSWORD`. Use the original password, or remove the volume to start fresh (this deletes all Datalyst data). |
 | Containers from the development `docker-compose.yml` get replaced | Both files share a project name. The deployment file uses `datalyst-deploy`; keep it distinct if you rename things. |
 | **Data sources** says no worker is running | Start it: `docker compose -f deploy/compose.yaml up -d worker`, then check its logs. |
 | A source shows `error` | The worker cannot reach or read the database; the message is shown on the page. Check the network path and the read-only account. |
-| Descriptions or embeddings are slow | Free-tier LLM rate limits; jobs pause and resume automatically. Use a separate, cheaper describe model (`DATALYST_DESCRIBE_LLM_*`). |
+| Descriptions or embeddings are slow | Free-tier LLM rate limits; jobs pause and resume automatically. Set a separate, cheaper model under **Settings → Descriptions**. |
+| Questions fail with "No API key" | Add the key under **Settings → Model** and use **Test connection**. |
+| A setting is greyed out | It is pinned by a `DATALYST__...` environment variable on the containers; change or remove the variable. |
 | Answers ignore a new column | The worker checks for schema changes every 5 minutes by default; click **Check for schema changes** to check now. Queries that hit a missing table or column re-sync automatically. |
-| Signed out after a while | Tokens last `DATALYST_AUTH_TOKEN_MINUTES` (8 hours by default). |
+| Signed out after a while | Sign-ins last 8 hours by default (**Settings → Sign-in**). |
