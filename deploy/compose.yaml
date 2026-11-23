@@ -1,0 +1,119 @@
+name: datalyst-deploy
+
+x-app: &app
+  image: ${DATALYST_IMAGE:-datalyst:latest}
+  build:
+    context: ..
+    dockerfile: Dockerfile
+  env_file: .env
+  environment:
+    DATALYST_METASTORE_URL: ${DATALYST_METASTORE_URL:-postgresql://datalyst:${METASTORE_PASSWORD}@metastore:5432/datalyst}
+  restart: unless-stopped
+  depends_on:
+    bootstrap:
+      condition: service_completed_successfully
+
+services:
+  metastore:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: datalyst
+      POSTGRES_PASSWORD: ${METASTORE_PASSWORD:?set METASTORE_PASSWORD in deploy/.env}
+      POSTGRES_DB: datalyst
+    volumes:
+      - metastore-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U datalyst -d datalyst"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
+
+  bootstrap:
+    <<: *app
+    command: ["bootstrap"]
+    restart: "no"
+    healthcheck:
+      disable: true
+    depends_on:
+      metastore:
+        condition: service_healthy
+
+  api:
+    <<: *app
+    command: ["api", "--host", "0.0.0.0", "--port", "8000", "--workers", "${API_WORKERS:-2}"]
+    environment:
+      DATALYST_METASTORE_URL: ${DATALYST_METASTORE_URL:-postgresql://datalyst:${METASTORE_PASSWORD}@metastore:5432/datalyst}
+      HEALTH_PORT: "8000"
+      HEALTH_PATH: /ready
+
+  worker:
+    <<: *app
+    command: ["worker"]
+    healthcheck:
+      disable: true
+    deploy:
+      replicas: ${WORKER_REPLICAS:-1}
+
+  ui:
+    <<: *app
+    entrypoint: ["streamlit", "run", "ui/app.py"]
+    command: ["--server.port", "8501", "--server.address", "0.0.0.0"]
+    environment:
+      DATALYST_UI_API_URL: http://api:8000
+      HEALTH_PORT: "8501"
+      HEALTH_PATH: /_stcore/health
+    depends_on:
+      api:
+        condition: service_healthy
+
+  proxy:
+    image: caddy:2
+    ports:
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:-:80}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      api:
+        condition: service_healthy
+      ui:
+        condition: service_healthy
+    restart: unless-stopped
+
+  demo-shop:
+    profiles: ["demo"]
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: datalyst_admin
+      POSTGRES_PASSWORD: datalyst_admin
+      POSTGRES_DB: shop
+    volumes:
+      - ../docker/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U datalyst_admin -d shop"]
+      interval: 3s
+      retries: 30
+
+  demo-erp:
+    profiles: ["demo"]
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: wh_admin
+      POSTGRES_PASSWORD: wh_admin
+      POSTGRES_DB: erp
+    volumes:
+      - ../docker/warehouse/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U wh_admin -d erp"]
+      interval: 3s
+      retries: 30
+
+volumes:
+  metastore-data:
+  caddy-data:
+  caddy-config:

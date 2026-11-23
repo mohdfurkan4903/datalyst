@@ -40,7 +40,21 @@ LIMIT 5
 
 Supported data sources: PostgreSQL. More are on the [roadmap](#roadmap).
 
-## Quick start
+## Deploy for your organization
+
+One command starts the web UI, API, background worker, metastore and an HTTPS proxy:
+
+```bash
+cp deploy/.env.example deploy/.env
+```
+
+```bash
+docker compose -f deploy/compose.yaml up -d --build
+```
+
+See [docs/deployment.md](docs/deployment.md) for HTTPS, secrets, connecting databases safely, access control, scaling, upgrades, backups, monitoring and a security checklist. Add `--profile demo` to include two sample databases.
+
+## Quick start (development)
 
 Requirements: Python 3.12+, [uv](https://docs.astral.sh/uv/) and Docker.
 
@@ -311,9 +325,12 @@ question ──► AnalystService ──► SchemaCatalog (cached schema)
 src/datalyst/
 ├── core/          models, interfaces and exceptions (no external dependencies)
 ├── connectors/    data source implementations and the connector registry
-│   └── postgres/  connection pool, schema introspection, query validator
-├── catalog/       schema cache, table search and retrieval
-├── llm/           chat model factory for all providers
+│   └── postgres/  connection pool, introspection, profiling queries, query validator
+├── metastore/     Postgres metastore: migrations and repositories
+├── sync/          background worker, job queue handlers, incremental sync
+├── enrichment/    profiling, relationship inference, AI descriptions, embeddings
+├── catalog/       schema snapshots, retrieval, SQL reference checks
+├── llm/           chat and embedding model factories for all providers
 ├── agent/         LangGraph agent, prompts and response parsing
 ├── services/      analyst, questions, auth and the per-source registry
 ├── api/           FastAPI app, routers, auth dependencies, error mapping
@@ -321,6 +338,11 @@ src/datalyst/
 ├── bootstrap.py   wires the pieces together from settings
 ├── config.py      settings
 └── cli.py         command-line interface
+ui/                Streamlit web UI (talks only to the API)
+deploy/            production compose file, Caddy config, env template
+docs/              deployment guide
+docker/            sample databases for development and demos
+Dockerfile         one image for the API, worker and UI
 ```
 
 New data sources plug in by implementing the `DataSource` interface and registering a URL scheme with `@register_connector`.
@@ -351,10 +373,9 @@ uv run ruff check . && uv run ruff format .
 
 - Evaluations: a golden dataset of questions with reference queries, scored on execution accuracy and safety
 - Observability: OpenTelemetry tracing of every question, LLM call and query
-- REST API (FastAPI) and a web UI (Streamlit) with charts
-- Conversation memory and multiple sessions
-- Authentication and multi-user support
-- More data sources: CSV and Parquet upload, MongoDB, Cassandra and others
+- Conversation memory and follow-up questions
+- Single sign-on (OIDC)
+- More data sources: CSV and Parquet upload, MySQL, MongoDB, Cassandra and others
 - MCP server
 
 ## Contributing

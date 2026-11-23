@@ -1,0 +1,13 @@
+.git
+.venv
+.env
+.env.*
+!.env.example
+.pytest_cache
+.ruff_cache
+.datalyst
+**/__pycache__
+**/*.pyc
+.DS_Store
+evals/reports
+deploy/.env

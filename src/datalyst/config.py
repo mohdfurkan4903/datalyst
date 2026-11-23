@@ -18,6 +18,8 @@ class Settings(BaseSettings):
     secret_key: SecretStr | None = None
 
     auth_token_minutes: int = Field(default=480, ge=5)
+    bootstrap_admin_email: str | None = None
+    bootstrap_admin_password: SecretStr | None = None
     api_cors_origins: list[str] = Field(default_factory=list)
 
     query_timeout_seconds: float = Field(default=30, gt=0)

@@ -206,6 +206,37 @@ def usage(
     console.print(table)
 
 
+@app.command(
+    help="Apply migrations and, if there are no users yet, create the first admin "
+    "from DATALYST_BOOTSTRAP_ADMIN_EMAIL and DATALYST_BOOTSTRAP_ADMIN_PASSWORD."
+)
+def bootstrap() -> None:
+    settings = get_settings()
+    with _errors_as_exit_codes(), open_metastore(settings) as metastore:
+        applied = metastore.migrate()
+        console.print(
+            f"Applied migrations: {', '.join(applied)}"
+            if applied
+            else "Metastore is up to date."
+        )
+        if metastore.users.all():
+            console.print("Users exist; no admin created.")
+            return
+        if not settings.bootstrap_admin_email or not settings.bootstrap_admin_password:
+            console.print(
+                "[yellow]No users yet. Set DATALYST_BOOTSTRAP_ADMIN_EMAIL and "
+                "DATALYST_BOOTSTRAP_ADMIN_PASSWORD, or run: datalyst user create --admin[/yellow]"
+            )
+            return
+        user = build_auth(settings, metastore).create_user(
+            settings.bootstrap_admin_email,
+            settings.bootstrap_admin_password.get_secret_value(),
+            "Administrator",
+            Role.ADMIN,
+        )
+        console.print(f"Created admin {user.email}.")
+
+
 @app.command(help="Run the HTTP API.")
 def api(
     host: Annotated[str, typer.Option(help="Interface to listen on.")] = "127.0.0.1",
