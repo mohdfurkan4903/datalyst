@@ -53,7 +53,8 @@ def update_source(
 
 
 @router.delete("/{source_id}", status_code=204)
-def delete_source(source_id: int, _: Admin, app: Services) -> None:
+def delete_source(source_id: int, user: CurrentUser, app: Services) -> None:
+    user.require_owner(app.metastore.sources.get(source_id).owner_id)
     app.registry.forget(source_id)
     delete_files(app, source_id)
     app.metastore.sources.delete(source_id)

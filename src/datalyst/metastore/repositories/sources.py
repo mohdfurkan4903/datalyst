@@ -7,7 +7,7 @@ from datalyst.core.exceptions import ConfigurationError, NotFoundError
 from datalyst.core.models import DataSourceInfo, LLMDataPolicy, SourceStatus
 
 _COLUMNS = """
-id, name, kind, include_schemas, llm_data_policy, open_to_all,
+id, name, kind, owner_id, include_schemas, llm_data_policy, open_to_all,
 sync_interval_seconds, catalog_version, status, status_detail, last_synced_at,
 last_checked_at, next_check_at, created_at
 """
@@ -26,15 +26,18 @@ class SourceRepository:
         include_schemas: list[str] | None = None,
         llm_data_policy: LLMDataPolicy = LLMDataPolicy.ROWS,
         sync_interval_seconds: int = 300,
+        owner_id: int | None = None,
+        open_to_all: bool = True,
     ) -> DataSourceInfo:
+        """Add a source. A private one (not open to all) is usable by its owner."""
         try:
-            with self._pool.connection() as conn:
+            with self._pool.connection() as conn, conn.transaction():
                 row = conn.execute(
                     f"""
                     INSERT INTO data_sources (
                         name, kind, connection_url, include_schemas,
-                        llm_data_policy, sync_interval_seconds
-                    ) VALUES (%s, %s, %s, %s, %s, %s)
+                        llm_data_policy, sync_interval_seconds, owner_id, open_to_all
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                     RETURNING {_COLUMNS}
                     """,
                     (
@@ -44,8 +47,15 @@ class SourceRepository:
                         include_schemas or [],
                         llm_data_policy.value,
                         sync_interval_seconds,
+                        owner_id,
+                        open_to_all,
                     ),
                 ).fetchone()
+                if owner_id is not None and not open_to_all:
+                    conn.execute(
+                        "INSERT INTO source_users (source_id, user_id) VALUES (%s, %s)",
+                        (row["id"], owner_id),
+                    )
         except psycopg.errors.UniqueViolation as e:
             raise ConfigurationError(f"A data source named '{name}' exists.") from e
         except psycopg.errors.CheckViolation as e:
@@ -59,6 +69,18 @@ class SourceRepository:
         with self._pool.connection() as conn:
             rows = conn.execute(
                 f"SELECT {_COLUMNS} FROM data_sources ORDER BY name"
+            ).fetchall()
+        return [DataSourceInfo(**row) for row in rows]
+
+    def owned_by(self, user_id: int, kind: str | None = None) -> list[DataSourceInfo]:
+        with self._pool.connection() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT {_COLUMNS} FROM data_sources
+                WHERE owner_id = %s AND (%s::text IS NULL OR kind = %s)
+                ORDER BY name
+                """,
+                (user_id, kind, kind),
             ).fetchall()
         return [DataSourceInfo(**row) for row in rows]
 

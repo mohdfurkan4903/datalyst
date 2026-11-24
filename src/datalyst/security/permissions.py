@@ -22,6 +22,11 @@ class Principal:
         if not self.is_admin:
             raise PermissionDeniedError("Only admins can do this.")
 
+    def require_owner(self, owner_id: int | None) -> None:
+        """Allow admins and the user who uploaded the source."""
+        if not self.is_admin and owner_id != self.user.id:
+            raise PermissionDeniedError("Only the owner or an admin can do this.")
+
     def require_source(self, source_id: int) -> None:
         if not self.can_use(source_id):
             raise PermissionDeniedError("You do not have access to this data source.")

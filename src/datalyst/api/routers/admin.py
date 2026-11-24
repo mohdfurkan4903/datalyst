@@ -3,6 +3,7 @@ from datetime import timedelta
 from fastapi import APIRouter
 
 from datalyst.api.deps import Admin, Services
+from datalyst.api.routers.files import delete_files
 from datalyst.api.schemas import UserCreate, UserUpdate
 from datalyst.core.exceptions import ConfigurationError
 from datalyst.core.models import Role, User
@@ -51,6 +52,12 @@ def delete_user(user_id: int, admin: Admin, app: Services) -> None:
         raise ConfigurationError("You cannot delete your own account.")
     if target.role == Role.ADMIN and app.metastore.users.count_admins() <= 1:
         raise ConfigurationError("Keep at least one active admin.")
+    # Their private uploads go with them; sources shared with others stay.
+    for source in app.metastore.sources.owned_by(user_id, "files"):
+        if not source.open_to_all:
+            app.registry.forget(source.id)
+            delete_files(app, source.id)
+            app.metastore.sources.delete(source.id)
     app.metastore.users.delete(user_id)
 
 

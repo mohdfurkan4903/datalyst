@@ -103,6 +103,7 @@ Everyone sees:
 
 Admins also see:
 
+- **My files** (non-admin users): upload your own CSV and Excel files, private to you, and ask questions about them.
 - **Data sources:** add a database (the connection is tested first), sync it, choose what data may be sent to the AI model, and choose who can use it: all users or only picked users.
 - **Users:** add users, block or unblock them, make them admins, set a new password, or remove them.
 - **Settings:** model, keys and tuning, as described above.
@@ -137,7 +138,9 @@ Admins can switch memory off (`memory.enabled`) or stop the assistant from savin
 
 ## Uploaded files
 
-Admins can upload CSV files (`.csv`, `.tsv`, `.txt`) and Excel workbooks (`.xlsx`, `.xlsm`) on the Data sources page. Each CSV file becomes a table named after the file, so several files in one source can be joined. A workbook with one sheet is named after the file; a workbook with several sheets gives one table per sheet, named after the sheet (hidden and empty sheets are skipped). Datalyst reads the types once (numbers, dates, text, yes/no), cleans the column names, keeps the data as Parquet in the folder set by `files.dir` and answers questions with DuckDB. Uploading a file with the same name replaces that table.
+Everyone can upload CSV files (`.csv`, `.tsv`, `.txt`) and Excel workbooks (`.xlsx`, `.xlsm`). Admins do it on the Data sources page; other users on their own My files page. Each CSV file becomes a table named after the file, so several files in one source can be joined. A workbook with one sheet is named after the file; a workbook with several sheets gives one table per sheet, named after the sheet (hidden and empty sheets are skipped). Datalyst reads the types once (numbers, dates, text, yes/no), cleans the column names, keeps the data as Parquet in the folder set by `files.dir` and answers questions with DuckDB. Uploading a file with the same name replaces that table.
+
+A user's upload is private: only that user and the admins can see or use it, and the user can add, replace and remove its files or delete it, but cannot share it or change anything else. An admin can share it with others from the Data sources page. An admin's own upload is open to everyone by default. Admins can turn user uploads off (`files.user_uploads`) or limit how many uploaded sources one user can have (`files.max_user_sources`, 10 by default) on the Settings page, under Advanced. Removing a user deletes their private uploads.
 
 For Excel, title lines above the table are skipped, error cells such as `#DIV/0!` become empty, and a formula is read as the value Excel last saved with it (a workbook written by a program that never calculated its formulas has empty cells there). Old `.xls` files must be saved as `.xlsx` first.
 

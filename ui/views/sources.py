@@ -20,8 +20,9 @@ STATUS = {
 def render() -> None:
     st.title("Data sources")
     sources = call(client().sources) or []
+    owners = {u["id"]: u["name"] or u["email"] for u in call(client().users) or []}
     if sources:
-        _table(sources)
+        _table(sources, owners)
         names = [s["name"] for s in sources]
         chosen = st.selectbox("Manage a source", names)
         _manage(next(s for s in sources if s["name"] == chosen))
@@ -30,13 +31,14 @@ def render() -> None:
     _add_source()
 
 
-def _table(sources: list[dict]) -> None:
+def _table(sources: list[dict], owners: dict[int, str]) -> None:
     st.dataframe(
         pd.DataFrame(
             [
                 {
                     "Name": s["name"],
                     "Type": "Uploaded files" if s["kind"] == "files" else "Database",
+                    "Owner": owners.get(s.get("owner_id"), "—"),
                     "Status": STATUS.get(s["status"], s["status"]),
                     "Who can use it": "All users"
                     if s["open_to_all"]
@@ -75,7 +77,7 @@ def _manage(source: dict) -> None:
             st.rerun()
 
     if source["kind"] == "files":
-        _files(source)
+        files_panel(source)
     _access(source)
 
     with st.expander("Connection and privacy"), st.form(f"edit-{source['id']}"):
@@ -101,7 +103,7 @@ def _manage(source: dict) -> None:
                 st.rerun()
 
 
-def _files(source: dict) -> None:
+def files_panel(source: dict) -> None:
     files = call(lambda: client().source_files(source["id"])) or []
     st.subheader("Files")
     st.caption(
@@ -183,10 +185,10 @@ def _add_source() -> None:
         with database:
             _add_database()
         with upload:
-            _upload_source()
+            upload_form()
 
 
-def _upload_source() -> None:
+def upload_form() -> None:
     with st.form("upload-source"):
         st.caption(
             "Upload a CSV or Excel file to ask questions about it. You can add "

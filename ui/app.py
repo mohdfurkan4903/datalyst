@@ -22,7 +22,7 @@ from ui.session import (
     signed_in,
     sync_cookie,
 )
-from ui.views import ask, history, memory, settings, sources, users
+from ui.views import ask, history, memory, my_files, settings, sources, users
 
 st.set_page_config(page_title="Datalyst", page_icon="📊", layout="wide")
 restore_session()
@@ -115,6 +115,10 @@ else:
         st.Page(memory.render, title="Memory", icon="🧠", url_path="memory"),
     ]
     settings_page = None
+    if not is_admin():
+        pages.append(
+            st.Page(my_files.render, title="My files", icon="📁", url_path="files")
+        )
     if is_admin():
         settings_page = st.Page(
             settings.render, title="Settings", icon="⚙️", url_path="settings"

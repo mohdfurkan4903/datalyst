@@ -131,7 +131,7 @@ def pick_source(key: str = "source") -> dict | None:
             + (
                 " Add one under Data sources."
                 if is_admin()
-                else " Ask an admin for access."
+                else " Upload your own files under My files, or ask an admin for access."
             )
         )
         return None

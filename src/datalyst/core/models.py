@@ -227,6 +227,7 @@ class DataSourceInfo(BaseModel):
     id: int
     name: str
     kind: str
+    owner_id: int | None = None
     include_schemas: list[str] = Field(default_factory=list)
     llm_data_policy: LLMDataPolicy = LLMDataPolicy.ROWS
     open_to_all: bool = True

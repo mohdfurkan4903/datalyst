@@ -45,6 +45,7 @@ def config(metastore, files_dir):
         "DATALYST__FILES__DIR": str(files_dir),
         "DATALYST__FILES__MAX_UPLOAD_MB": "1",
         "DATALYST__MEMORY__MAX_ITEMS": "3",
+        "DATALYST__FILES__MAX_USER_SOURCES": "2",
     }
     return ConfigService(metastore, environ=environ, refresh_seconds=0)
 
@@ -702,6 +703,157 @@ def test_removing_a_user_removes_their_chats_and_memories(
     assert metastore.conversations.list(uid) == []
 
 
+@pytest.fixture
+def other(api, admin):
+    created = api.post(
+        "/api/users",
+        headers=admin,
+        json={
+            "email": "other@example.com",
+            "password": "other-password-123",
+            "name": "Olu",
+        },
+    )
+    assert created.status_code == 201, created.text
+    return login(api, "other@example.com", "other-password-123")
+
+
+def test_any_user_can_upload_files_that_stay_private_to_them(
+    api, admin, analyst, other, replies, files_dir
+):
+    created = upload(api, analyst, "ann-sales")
+    assert created.status_code == 201, created.text
+    mine = created.json()
+    assert mine["kind"] == "files" and mine["open_to_all"] is False
+    assert mine["owner_id"] == user_id(api, admin)  # the analyst
+
+    # They can ask about it; nobody else can see or use it, except admins.
+    replies(
+        sql_reply(
+            "SELECT customer, SUM(total) AS spent FROM main.orders GROUP BY 1 ORDER BY 1"
+        )
+    )
+    answer = ask(api, analyst, mine["id"], "Spend per customer?")
+    assert answer["result"]["rows"] == [["Ann", 17.75], ["Bob", 20.0]]
+    assert [s["name"] for s in api.get("/api/sources", headers=analyst).json()] == [
+        "ann-sales"
+    ]
+    assert api.get("/api/sources", headers=other).json() == []
+    denied = api.post(
+        f"/api/sources/{mine['id']}/ask", headers=other, json={"question": "hi"}
+    )
+    assert denied.status_code == 403
+    assert [s["name"] for s in api.get("/api/sources", headers=admin).json()] == [
+        "ann-sales"
+    ]
+    assert (
+        api.post(
+            f"/api/sources/{mine['id']}/ask", headers=admin, json={"question": "hi"}
+        ).status_code
+        != 403
+    )
+
+
+def test_owners_manage_their_own_files_and_nobody_elses(
+    api, admin, analyst, other, shop, files_dir
+):
+    mine = upload(api, analyst, "ann-sales").json()["id"]
+
+    added = api.post(
+        f"/api/sources/{mine}/files",
+        headers=analyst,
+        files={"file": ("customers.csv", b"id,name\n1,Ann\n", "text/csv")},
+    )
+    assert added.status_code == 201, added.text
+    listed = api.get(f"/api/sources/{mine}/files", headers=analyst).json()
+    assert [f["table"] for f in listed] == ["customers", "orders"]
+    assert (
+        api.delete(f"/api/sources/{mine}/files/customers", headers=analyst).status_code
+        == 204
+    )
+
+    # Another user, and the admin's own sources, are out of reach.
+    for headers in (other,):
+        assert api.get(f"/api/sources/{mine}/files", headers=headers).status_code == 403
+        assert api.delete(f"/api/sources/{mine}", headers=headers).status_code == 403
+        assert (
+            api.post(
+                f"/api/sources/{mine}/files",
+                headers=headers,
+                files={"file": ("x.csv", b"a\n1\n", "text/csv")},
+            ).status_code
+            == 403
+        )
+    assert api.get(f"/api/sources/{shop}/files", headers=analyst).status_code == 403
+    assert api.delete(f"/api/sources/{shop}", headers=analyst).status_code == 403
+    # Owners cannot change who can use their source or its connection.
+    assert (
+        api.put(
+            f"/api/sources/{mine}/access", headers=analyst, json={"open_to_all": True}
+        ).status_code
+        == 403
+    )
+    assert (
+        api.patch(
+            f"/api/sources/{mine}", headers=analyst, json={"url": "x"}
+        ).status_code
+        == 403
+    )
+    # Admins can manage any of them.
+    assert api.get(f"/api/sources/{mine}/files", headers=admin).status_code == 200
+
+    assert api.delete(f"/api/sources/{mine}", headers=analyst).status_code == 204
+    assert list(files_dir.iterdir()) == []
+    assert [s["name"] for s in api.get("/api/sources", headers=analyst).json()] == [
+        "shop"
+    ]
+
+
+def test_user_uploads_have_a_limit_and_an_off_switch(api, admin, analyst):
+    assert upload(api, analyst, "one").status_code == 201
+    assert upload(api, analyst, "two").status_code == 201
+    third = upload(api, analyst, "three")
+    assert third.status_code == 400 and "up to 2" in third.json()["error"]["message"]
+    # Admins are not limited.
+    assert upload(api, admin, "admin-one").status_code == 201
+    assert upload(api, admin, "admin-two").status_code == 201
+    assert upload(api, admin, "admin-three").status_code == 201
+
+    api.put(
+        "/api/settings", headers=admin, json={"values": {"files.user_uploads": False}}
+    )
+    off = upload(api, analyst, "four")
+    assert off.status_code == 403 and "turned off" in off.json()["error"]["message"]
+    assert upload(api, admin, "admin-four").status_code == 201
+
+
+def test_an_admins_upload_is_open_to_everyone(api, admin, analyst):
+    shared = upload(api, admin, "team-data").json()
+
+    assert shared["open_to_all"] is True
+    assert [s["name"] for s in api.get("/api/sources", headers=analyst).json()] == [
+        "team-data"
+    ]
+    assert (
+        api.get(f"/api/sources/{shared['id']}/files", headers=analyst).status_code
+        == 403
+    )
+
+
+def test_removing_a_user_removes_their_private_uploads_but_not_shared_ones(
+    api, admin, analyst, files_dir
+):
+    upload(api, analyst, "ann-private")
+    upload(api, admin, "team-data")
+    assert len(list(files_dir.iterdir())) == 2
+
+    api.delete(f"/api/users/{user_id(api, admin)}", headers=admin)
+
+    assert len(list(files_dir.iterdir())) == 1
+    names = [s["name"] for s in api.get("/api/sources", headers=admin).json()]
+    assert names == ["team-data"]
+
+
 def test_history_feedback_and_promotion(api, admin, analyst, shop, replies):
     replies(sql_reply("SELECT count(*) AS orders FROM public.orders"))
     answer = api.post(
@@ -885,6 +1037,8 @@ def test_users_cannot_change_anything_admins_manage(api, analyst, shop):
         ("POST", "/api/sources/{source_id}/ask"),
         ("POST", "/api/sources/{source_id}/query"),
         ("POST", "/api/history/{entry_id}/feedback"),
+        # Users upload and manage their own files; ownership is checked inside.
+        ("POST", "/api/sources/upload"),
         # A user's own chats and memories.
         ("DELETE", "/api/conversations/{conversation_id}"),
         ("POST", "/api/memories"),

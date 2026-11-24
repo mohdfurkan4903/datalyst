@@ -107,6 +107,8 @@ class Settings(BaseModel):
 
     files_dir: str = "data/files"
     files_max_upload_mb: int = Field(default=200, ge=1)
+    files_user_uploads: bool = True
+    files_max_user_sources: int = Field(default=10, ge=1)
 
     auth_token_minutes: int = Field(default=480, ge=5)
 
@@ -311,6 +313,16 @@ OPTIONS: tuple[Option, ...] = (
         "Folder where uploaded files are kept. The API and every worker must see the same folder.",
     ),
     Option("files", "max_upload_mb", "Largest file that can be uploaded."),
+    Option(
+        "files",
+        "user_uploads",
+        "Let every user upload their own CSV and Excel files. Their uploads are private to them and to admins.",
+    ),
+    Option(
+        "files",
+        "max_user_sources",
+        "Most uploaded-file sources one user can have. Admins are not limited.",
+    ),
     Option("auth", "token_minutes", "How long a sign-in lasts."),
 )
 OPTIONS_BY_NAME: dict[str, Option] = {option.name: option for option in OPTIONS}
