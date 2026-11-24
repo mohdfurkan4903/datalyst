@@ -52,10 +52,7 @@ From the repository root:
 cp deploy/.env.example deploy/.env
 ```
 
-`deploy/.env` holds only what is needed to start:
-
-1. `METASTORE_PASSWORD`: any long random value.
-2. `DATALYST_SECRET_KEY`: create one with `docker compose -f deploy/compose.yaml run --rm --no-deps migrate secret-key`.
+`deploy/.env` holds only what is needed to start. Set `METASTORE_PASSWORD` to any long random value.
 
 Start everything:
 
@@ -68,15 +65,15 @@ Open `http://localhost` (or the `HTTP_PORT` you set):
 1. **Create the admin account.** On a new installation the first page asks for it; it disappears once any user exists. Do this right after starting, before the address is shared.
 2. **Settings → Model:** choose the provider and model, add the API key and click **Test connection**. Optionally set a cheaper model for background descriptions and an embedding model.
 3. **Data sources:** add each database with a read-only login (below). Within a minute or two the worker syncs, profiles and links its tables; AI descriptions follow.
-4. **People & access:** create accounts and groups, and grant groups the sources and tables they need.
+4. **Users:** add your team. Each data source is open to all users unless you limit it to picked users under **Data sources → Who can use it**.
 
 ## Configuration
 
-Following the approach Apache Airflow takes, only two values come from the environment: `DATALYST_METASTORE_URL` (set by the compose file) and `DATALYST_SECRET_KEY`. Every other option is kept in the metastore and edited by admins on the **Settings** page. Changes reach all API and worker containers within a few seconds, without a restart. API keys are encrypted with `DATALYST_SECRET_KEY` and are never displayed again.
+Following the approach Apache Airflow takes, only one value comes from the environment: `DATALYST_METASTORE_URL` (set by the compose file). Every other option is kept in the metastore and edited by admins on the **Settings** page. Changes reach all API and worker containers within a few seconds, without a restart. API keys are never displayed again after saving.
 
 To manage an option in code or a secret manager instead, add `DATALYST__<SECTION>__<KEY>` to `deploy/.env` (it is passed to every Datalyst container), for example `DATALYST__LLM__API_KEY=...`. An environment variable wins over the stored value and locks the option in the UI. Precedence: environment variable, then Settings page, then default.
 
-To see the effective configuration, use **Settings → Download config**, or:
+To see the effective configuration, use **Settings → Advanced → Download config**, or:
 
 ```bash
 docker compose -f deploy/compose.yaml exec api datalyst config list --include-sources
@@ -100,13 +97,13 @@ Caddy obtains and renews a Let's Encrypt certificate automatically (ports 80 and
 
 ### 2. Secrets
 
-| Variable | What it protects | Notes |
-|---|---|---|
-| `DATALYST_SECRET_KEY` | Encrypts stored connection URLs and API keys, and signs sign-in tokens | Store it in your secret manager. If it is lost, every connection and API key must be entered again and everyone signs in again. Changing it signs everyone out. |
-| `METASTORE_PASSWORD` | The bundled metastore | Only used by the bundled `metastore` service |
-| LLM and embedding keys | Provider access | Entered on the Settings page and stored encrypted. Give Datalyst its own keys so usage can be tracked and revoked |
+Datalyst does not encrypt what it stores. Database connection URLs (with their passwords) and LLM API keys are kept as plain text in the metastore, along with the random key that signs sign-ins. Anyone who can read the metastore or a backup of it can use those credentials, so:
 
-`deploy/.env` is ignored by git. Keep it readable only by the deploying user (`chmod 600 deploy/.env`).
+- Treat the metastore and its backups as credential stores: restrict network access to it, use a strong `METASTORE_PASSWORD`, and encrypt backups at rest.
+- Give Datalyst its own read-only database logins and its own LLM keys, so they can be rotated or revoked without affecting anything else.
+- Keep `deploy/.env` (ignored by git) readable only by the deploying user: `chmod 600 deploy/.env`.
+
+Connection URLs and API keys are never returned by the API or shown in the UI after saving.
 
 ### 3. Start
 
@@ -148,9 +145,11 @@ Questions themselves always send the relevant tables' structure, descriptions an
 
 ### 5. People and access
 
-- Admins create users under **People & access**. If nobody can sign in, run `docker compose -f deploy/compose.yaml exec api datalyst reset-password <email>`.
-- Analysts see only data sources granted to one of their groups, optionally limited to table patterns such as `public.ord_*`. Hidden tables are removed before anything reaches the LLM.
-- Changing a password, a role, or deactivating a user ends their sessions immediately.
+- There are two roles. **Admins** manage data sources, users and settings. **Users** ask questions and see their own history; they cannot change anything shared.
+- Admins add, block, unblock and remove users under **Users**. If nobody can sign in, run `docker compose -f deploy/compose.yaml exec api datalyst reset-password <email>`.
+- Each data source is open to all users or only to users an admin picks (**Data sources → Who can use it**). Admins can always use every source.
+- Blocking a user, or changing their password or role, ends their sessions immediately.
+- Error messages in the UI and API never contain stack traces or internal details. Each error carries a reference matching the request's `x-request-id`, which finds the full details in the API logs.
 
 ## Using a managed Postgres as the metastore
 
@@ -178,11 +177,11 @@ git pull
 docker compose -f deploy/compose.yaml up -d --build
 ```
 
-`migrate` applies any new migrations before the API and worker restart. Migrations run inside one transaction under an advisory lock, so a failed migration leaves the metastore unchanged and two starting stacks cannot apply the same migration twice. Back up first (below).
+`migrate` applies any new migrations before the API and worker restart. (Before version 0.1.0 the migrations were consolidated into one; a metastore created by an earlier development build must be recreated.) Migrations run inside one transaction under an advisory lock, so a failed migration leaves the metastore unchanged and two starting stacks cannot apply the same migration twice. Back up first (below).
 
 ## Backups
 
-Everything Datalyst knows (settings, encrypted connections and API keys, catalogs, descriptions written by people, glossary, examples, users, history) lives in the metastore. Back it up together with `DATALYST_SECRET_KEY`:
+Everything Datalyst knows (settings, connections and API keys, catalogs, descriptions written by people, glossary, examples, users, history) lives in the metastore, so one dump backs up everything. The dump contains credentials in plain text: store it encrypted.
 
 ```bash
 docker compose -f deploy/compose.yaml exec -T metastore pg_dump -U datalyst -Fc datalyst > datalyst-$(date +%F).dump
@@ -194,8 +193,6 @@ Restore into an empty metastore:
 docker compose -f deploy/compose.yaml exec -T metastore pg_restore -U datalyst -d datalyst --clean --if-exists < datalyst-2026-01-31.dump
 ```
 
-A metastore restored without the matching secret key cannot decrypt connection URLs or API keys; re-enter them under **Data sources** and **Settings**.
-
 ## Monitoring
 
 | Check | How |
@@ -204,7 +201,7 @@ A metastore restored without the matching secret key cannot decrypt connection U
 | API readiness (metastore reachable, migrations applied) | `GET /ready` (503 when not ready) |
 | UI | `GET /_stcore/health` on the ui container |
 | Worker | **Data sources** page shows running workers, queued and failed jobs, and recent schema changes |
-| LLM spend | **People & access → LLM usage** |
+| LLM spend | `GET /api/usage` (admins) |
 | Logs | `docker compose -f deploy/compose.yaml logs -f api worker`; every API request is logged with status, duration and an `x-request-id` |
 
 Containers have health checks; `docker compose ps` shows them.
@@ -212,18 +209,18 @@ Containers have health checks; `docker compose ps` shows them.
 ## Security checklist
 
 - [ ] HTTPS on a real domain (`SITE_ADDRESS`); plain HTTP only for local trials.
-- [ ] `DATALYST_SECRET_KEY` stored in a secret manager; `deploy/.env` readable only by the deploying user.
+- [ ] Metastore reachable only from Datalyst's containers, and its backups encrypted; `deploy/.env` readable only by the deploying user.
 - [ ] Every data source uses a read-only database account with `SELECT` only on what people may query.
 - [ ] LLM data policy chosen per source; a self-hosted model if data must not leave the network.
 - [ ] Admin account created right after the first start, before the address was shared.
-- [ ] Analysts placed in groups with only the sources and tables they need.
+- [ ] Sensitive data sources limited to the users who need them (**Data sources → Who can use it**).
 - [ ] Metastore backups scheduled and a restore tested.
 - [ ] The API and UI ports are not exposed directly; only the proxy is published.
 - [ ] Rate limiting for sign-in and questions at your edge (a load balancer, WAF, or a Caddy build with a rate-limit module), if the service is reachable from outside your network.
 
 ## Running without Docker
 
-Install with `uv sync --frozen --no-dev --all-extras`, export `DATALYST_METASTORE_URL` and `DATALYST_SECRET_KEY` (or put them in `.env` in the working directory), and run each process under your service manager (systemd, supervisord):
+Install with `uv sync --frozen --no-dev --all-extras`, export `DATALYST_METASTORE_URL` (or put it in `.env` in the working directory), and run each process under your service manager (systemd, supervisord):
 
 ```bash
 datalyst migrate

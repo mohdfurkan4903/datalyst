@@ -6,12 +6,12 @@ Bring your own model: OpenAI, Anthropic, Google Gemini, Groq, Ollama, LM Studio,
 
 ## Features
 
-- **Web app for the whole team**: ask questions, see charts, browse the data catalog, keep history, rate answers.
-- **Set up in the browser**: the first visit creates the admin; the AI model, API keys, databases, users and access are all configured in the UI.
+- **Web app for the whole team**: ask questions, see charts, keep history, rate answers.
+- **Set up in the browser**: the first visit creates the admin; the AI model, API keys, databases and users are all configured in the UI.
 - **Understands messy databases**: profiles columns, infers joins that were never declared, and writes descriptions with the LLM, so cryptic legacy schemas work without manual documentation.
 - **Stays in sync**: a background worker notices schema changes within minutes and re-reads only what changed.
 - **Read-only by design**, enforced in three independent layers (see [Safety](#safety)).
-- **Access control**: groups decide which databases and tables each analyst can query; hidden tables never reach the LLM.
+- **Simple access control**: admins manage everything; each database is open to all users or only to the users an admin picks.
 - **Scales out**: stateless API and worker processes share one Postgres metastore.
 
 Supported data sources: PostgreSQL. More are on the [roadmap](#roadmap).
@@ -28,11 +28,7 @@ git clone https://github.com/mohdfurkan4903/datalyst.git && cd datalyst
 cp deploy/.env.example deploy/.env
 ```
 
-Fill in the two values `deploy/.env` asks for: `METASTORE_PASSWORD` (any long random value) and `DATALYST_SECRET_KEY`, created with:
-
-```bash
-docker compose -f deploy/compose.yaml run --rm --no-deps migrate secret-key
-```
+Set `METASTORE_PASSWORD` in `deploy/.env` to any long random value.
 
 Start everything (web UI, API, background worker, a Postgres metastore and an HTTPS proxy):
 
@@ -45,7 +41,7 @@ Open `http://localhost` and:
 1. **Create the admin account.** The setup page appears only while no users exist.
 2. **Choose the AI model** on the Settings page: provider, model and API key, then **Test connection**.
 3. **Add a database** under Data sources, using a read-only login. The worker reads its structure, profiles it and links its tables within a minute or two.
-4. **Invite your team** under People & access, and grant their groups the databases and tables they need.
+4. **Invite your team** under Users. Every database is open to all users unless you limit it to picked users on its Data sources entry.
 
 See [docs/deployment.md](docs/deployment.md) for HTTPS on your domain, connecting databases safely, a managed Postgres, scaling, upgrades, backups, monitoring and a security checklist.
 
@@ -58,15 +54,18 @@ Datalyst follows the approach Apache Airflow takes: almost everything is configu
 | Variable | Description |
 |---|---|
 | `DATALYST_METASTORE_URL` | Postgres where Datalyst keeps everything it knows. Set for you by `deploy/compose.yaml`. |
-| `DATALYST_SECRET_KEY` | Encrypts stored connection URLs and API keys, and signs sign-in tokens. Create with `datalyst secret-key`; keep a copy safe. |
 
-**Everything else** is on the **Settings** page (admins only), grouped into sections: Model, Descriptions, Embeddings, Answers, Retrieval, Queries, Worker and Sign-in. Changes reach every API and worker process within a few seconds, with no restart. API keys are encrypted in the metastore and never shown again after saving.
+That is the only one. The key that signs sign-ins is created in the metastore on first start.
+
+**Everything else** is on the **Settings** page (admins only): **Model** and **Embeddings** up front, and the tuning sections (Descriptions, Answers, Retrieval, Queries, Worker, Sign-in) under **Advanced**. Changes reach every API and worker process within a few seconds, with no restart. API keys are never shown again after saving.
+
+Connection URLs and API keys are stored as plain text in the metastore, so protect the metastore and its backups like any database that holds credentials (see [docs/deployment.md](docs/deployment.md)).
 
 **Pinning an option.** Any option can be fixed with an environment variable named `DATALYST__<SECTION>__<KEY>`, for example `DATALYST__LLM__MODEL=gpt-4.1-mini`. A pinned option wins over the stored value and is locked in the UI; this suits teams that manage configuration in code or a secret manager. Precedence: environment variable, then Settings page, then default.
 
 **Seeing the effective configuration.** Like `airflow config list`:
 
-- In the UI: **Settings → Download config** (every option, its value and where it comes from) or **Download .env** (only changed options, as `DATALYST__*` variables).
+- In the UI: **Settings → Advanced → Download config** (every option, its value and where it comes from) or **Download .env** (only changed options, as `DATALYST__*` variables).
 - From the command line:
 
 ```bash
@@ -95,15 +94,20 @@ Any other OpenAI-compatible server works with `openai` plus a base URL. Backgrou
 
 ## Using Datalyst
 
-- **Ask:** chat with a data source; each answer shows the result table, an automatic chart (line for time series, bar for categories, a single number as a metric), the SQL, and 👍/👎 feedback. Admins can save a good answer as a verified example. Results download as CSV.
-- **History:** past questions with status, SQL and timing; rerun any SQL.
-- **Catalog:** search tables and columns and read what each one means. Admins edit descriptions (saved as human-approved), review AI text marked stale after schema changes, and reject, restore or add joins.
-- **Glossary & examples:** business terms the agent follows (what "revenue" means) and verified question/SQL pairs that similar questions reuse.
-- **Data sources** (admin): add a database (the connection is tested first), choose what data may be sent to the LLM, see sync status and recent schema changes.
-- **People & access** (admin): users, roles, groups, per-source and per-table grants, LLM usage.
-- **Settings** (admin): model, keys and tuning, as described above.
+Everyone sees:
 
-Accounts use email and password, hashed with Argon2. Changing a password or role, or deactivating a user, ends their sessions immediately. Analysts see only the data sources granted to their groups, optionally limited to table patterns such as `public.ord_*`; hidden tables are removed before anything reaches the LLM, and SQL that names them is rejected.
+- **Ask:** chat with a data source; each answer shows the result table, an automatic chart (line for time series, bar for categories, a single number as a metric), the SQL, and 👍/👎 feedback. Results download as CSV. Admins can save a good answer as a verified example that similar questions reuse.
+- **History:** past questions with their status and SQL.
+
+Admins also see:
+
+- **Data sources:** add a database (the connection is tested first), sync it, choose what data may be sent to the AI model, and choose who can use it: all users or only picked users.
+- **Users:** add users, block or unblock them, make them admins, set a new password, or remove them.
+- **Settings:** model, keys and tuning, as described above.
+
+Only admins can change anything shared: data sources, users and settings. Accounts use email and password, hashed with Argon2. Blocking a user, or changing their password or role, ends their sessions at once.
+
+Errors never show internals: people see a short message, and the details (with a reference id matching the API's `x-request-id`) go to the server logs.
 
 Everything the UI does goes through a REST API, so other tools can use it too; the API service serves interactive docs at `/docs`.
 
@@ -116,7 +120,6 @@ The `datalyst` command starts the services and covers the few tasks an operator 
 | `datalyst api` | Runs the HTTP API (`--host`, `--port`, `--workers`). |
 | `datalyst worker` | Runs the background sync worker until stopped; `--once` processes queued jobs and exits. |
 | `datalyst migrate` | Creates or upgrades the metastore tables. |
-| `datalyst secret-key` | Prints a new key for `DATALYST_SECRET_KEY`. |
 | `datalyst config list / get-value / options` | Shows the effective configuration. |
 | `datalyst reset-password <email>` | Sets a password when nobody can sign in. |
 
@@ -178,7 +181,7 @@ docker compose up -d
 cp .env.example .env
 ```
 
-Put a key from `uv run datalyst secret-key` into `DATALYST_SECRET_KEY` in `.env`, then create the tables and start the services, each in its own terminal:
+Create the tables, then start the services, each in its own terminal:
 
 ```bash
 uv run datalyst migrate
@@ -223,7 +226,7 @@ src/datalyst/
 ├── agent/         LangGraph agent, prompts and response parsing
 ├── services/      analyst, questions, auth, settings and the per-source registry
 ├── api/           FastAPI app, routers, auth dependencies, error mapping
-├── security/      password hashing, tokens, permissions, secret encryption
+├── security/      password hashing, sign-in tokens, permissions
 ├── bootstrap.py   wires the pieces together
 ├── config.py      startup settings and the runtime option registry
 └── cli.py         service and operator commands
