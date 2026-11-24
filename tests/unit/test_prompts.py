@@ -62,6 +62,19 @@ def test_system_prompt_mentions_dialect_and_refusal_marker():
     assert "{" not in prompt
 
 
+def test_system_prompt_adapts_to_the_database():
+    prompt = render_system_prompt(
+        "MySQL",
+        "SQL",
+        default_schema="shop",
+        text_date_function="STR_TO_DATE(column, '%d/%m/%Y')",
+    )
+
+    assert "shop.orders" in prompt
+    assert "STR_TO_DATE(column, '%d/%m/%Y')" in prompt
+    assert "public." not in prompt and "to_date" not in prompt
+
+
 def test_rewrite_prompt_defines_reply_format():
     prompt = render_rewrite_prompt("PostgreSQL")
     assert "QUESTION:" in prompt

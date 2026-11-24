@@ -136,7 +136,7 @@ def _add_source() -> None:
         url = st.text_input(
             "Connection URL",
             type="password",
-            placeholder="postgresql://readonly_user:password@host:5432/database",
+            placeholder="postgresql://user:password@host:5432/database  or  mysql://user:password@host:3306/database",
         )
         policy = st.radio(
             "What may be sent to the AI model to describe tables",

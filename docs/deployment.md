@@ -133,6 +133,15 @@ ALTER ROLE datalyst_ro SET statement_timeout = '60s';
 
 Grant `SELECT` only on what people may query; tables the account cannot read are invisible to Datalyst. `pg_stats` statistics are used for profiling, so make sure `ANALYZE` runs (autovacuum does this by default).
 
+For MySQL, the equivalent login (use `'%'` or the host Datalyst connects from):
+
+```sql
+CREATE USER 'datalyst_ro'@'%' IDENTIFIED BY '<long random password>';
+GRANT SELECT ON sales.* TO 'datalyst_ro'@'%';
+```
+
+Connect with `mysql://datalyst_ro:<password>@host:3306/sales`. The database in the URL is the one questions are answered from; leave it out to read every database the login can see, and add `?ssl=true` for TLS. Datalyst starts every MySQL session read-only with a query time limit. MySQL keeps no column statistics, so profiling uses a bounded sample of each table; run `ANALYZE TABLE` now and then so row counts are close.
+
 When adding the source, choose what may be sent to the LLM to write descriptions:
 
 | Policy | Sent to the LLM |

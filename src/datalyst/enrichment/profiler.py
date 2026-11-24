@@ -25,9 +25,21 @@ EXAMPLES_KEPT = 5
 EXAMPLE_MAX_LENGTH = 40
 JSON_KEYS_KEPT = 15
 
-TEXT_TYPES = ("text", "character varying", "character", "varchar", "char", "bpchar")
-INTEGER_TYPES = ("smallint", "integer", "bigint")
-DECIMAL_TYPES = ("numeric", "decimal", "real", "double precision", "money")
+TEXT_TYPES = (
+    "text",
+    "tinytext",
+    "mediumtext",
+    "longtext",
+    "character varying",
+    "character",
+    "varchar",
+    "char",
+    "bpchar",
+)
+INTEGER_TYPES = ("smallint", "integer", "bigint", "int", "tinyint", "mediumint")
+DECIMAL_TYPES = ("numeric", "decimal", "real", "double", "float", "money")
+TYPE_MODIFIERS = ("unsigned", "zerofill")
+ENUM_TYPES = ("enum", "set")
 DATE_TYPES = ("date", "timestamp", "time")
 
 BOOLEAN_PAIRS = [
@@ -114,7 +126,8 @@ def name_tokens(name: str) -> list[str]:
 
 def type_family(data_type: str) -> str:
     base = data_type.split("(")[0].strip().lower()
-    if base.startswith(TEXT_TYPES):
+    base = " ".join(w for w in base.split() if w not in TYPE_MODIFIERS)
+    if base.startswith(TEXT_TYPES) or base in ENUM_TYPES:
         return "text"
     if base in INTEGER_TYPES:
         return "integer"

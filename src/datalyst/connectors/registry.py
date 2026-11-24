@@ -53,3 +53,18 @@ def _create_postgres(
         pool_min_size=settings.query_pool_min_size,
         pool_max_size=settings.query_pool_max_size,
     )
+
+
+@register_connector("mysql")
+def _create_mysql(
+    url: str, settings: Settings, include_schemas: list[str]
+) -> DataSource:
+    from datalyst.connectors.mysql import MySQLDataSource
+
+    return MySQLDataSource(
+        url,
+        timeout_seconds=settings.query_timeout_seconds,
+        max_rows=settings.query_max_rows,
+        include_schemas=include_schemas,
+        pool_max_size=settings.query_pool_max_size,
+    )

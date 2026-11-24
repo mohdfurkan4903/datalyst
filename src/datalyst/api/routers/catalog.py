@@ -19,14 +19,16 @@ def list_tables(source_id: int, user: CurrentUser, app: Services) -> list[Table]
 @router.get("/tables/{table}")
 def get_table(source_id: int, table: str, user: CurrentUser, app: Services) -> dict:
     user.require_source(source_id)
-    return app.metastore.catalog.curation(source_id, _ref(table))
+    return app.metastore.catalog.curation(source_id, _ref(app, source_id, table))
 
 
 @router.put("/tables/{table}/description", status_code=204)
 def describe_table(
     source_id: int, table: str, body: DescriptionUpdate, _: Admin, app: Services
 ) -> None:
-    app.metastore.catalog.set_description(source_id, _ref(table), body.description)
+    app.metastore.catalog.set_description(
+        source_id, _ref(app, source_id, table), body.description
+    )
 
 
 @router.put("/tables/{table}/columns/{column}/description", status_code=204)
@@ -39,7 +41,7 @@ def describe_column(
     app: Services,
 ) -> None:
     app.metastore.catalog.set_description(
-        source_id, _ref(table), body.description, column
+        source_id, _ref(app, source_id, table), body.description, column
     )
 
 
@@ -72,17 +74,20 @@ def add_relationship(
     source_id: int, body: RelationshipCreate, _: Admin, app: Services
 ) -> dict:
     app.metastore.catalog.add_relationship(
-        source_id, _column(body.child), _column(body.parent)
+        source_id,
+        _column(app, source_id, body.child),
+        _column(app, source_id, body.parent),
     )
     return {"child": body.child, "parent": body.parent, "origin": "human"}
 
 
-def _ref(name: str) -> TableRef:
+def _ref(app, source_id: int, name: str) -> TableRef:
     if "." not in name:
-        name = f"public.{name}"
+        source = app.metastore.sources.get(source_id)
+        name = f"{app.registry.get(source).default_schema}.{name}"
     return TableRef.parse(name)
 
 
-def _column(name: str) -> ColumnRef:
+def _column(app, source_id: int, name: str) -> ColumnRef:
     table, _, column = name.rpartition(".")
-    return ColumnRef(table=_ref(table), column=column)
+    return ColumnRef(table=_ref(app, source_id, table), column=column)

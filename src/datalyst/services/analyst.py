@@ -16,6 +16,14 @@ class AnalystService:
         self._catalog = catalog
         self._agent = agent
 
+    @property
+    def sql_dialect(self) -> str:
+        return self._datasource.sql_dialect
+
+    @property
+    def default_schema(self) -> str:
+        return self._datasource.default_schema
+
     def schema(self, refresh: bool = False) -> DataSchema:
         return self._catalog.get(refresh=refresh)
 
@@ -35,7 +43,12 @@ class AnalystService:
 
     def run_sql(self, sql: str) -> QueryResult:
         query = self._datasource.validate(sql)
-        if problems := catalog_problems(query, self._catalog.get()):
+        if problems := catalog_problems(
+            query,
+            self._catalog.get(),
+            self._datasource.sql_dialect,
+            self._datasource.default_schema,
+        ):
             raise UnsafeQueryError(" ".join(problems))
         return self._datasource.execute(query)
 

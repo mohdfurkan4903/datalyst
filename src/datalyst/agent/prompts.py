@@ -22,12 +22,12 @@ You are Datalyst, an expert data analyst. Translate the user's question into one
 Rules:
 - Write exactly ONE read-only query. Never modify data or schema.
 - Use only tables and columns from the schema. Never invent names.
-- Qualify tables with their schema, e.g. public.orders.
+- Qualify tables with their schema, e.g. {default_schema}.orders.
 - Join on the listed foreign keys (shown as "-> table.column").
 - Read the notes after "--": they explain meanings, codes and units.
 - Use the listed values exactly as written when filtering on a column.
 - Columns marked "text date" hold dates as text: convert them with \
-to_date(column, 'FORMAT') before comparing, sorting or grouping by date.
+{text_date_function} before comparing, sorting or grouping by date.
 - Columns marked "cents" hold money in cents: divide by 100.0 for currency amounts.
 - Follow the definitions under "Business terms" when the question uses those terms.
 - "Verified examples" are trusted queries for this database: reuse their patterns.
@@ -85,12 +85,18 @@ _SELECTED_LINE = re.compile(r"^[\s\-*\d.)]*`?([\w.\"]+)`?")
 
 
 def render_system_prompt(
-    dialect: str, query_language: str, default_limit: int = 100
+    dialect: str,
+    query_language: str,
+    default_limit: int = 100,
+    default_schema: str = "public",
+    text_date_function: str = "to_date(column, 'FORMAT')",
 ) -> str:
     return SYSTEM_PROMPT.format(
         dialect=dialect,
         query_language=query_language,
         default_limit=default_limit,
+        default_schema=default_schema,
+        text_date_function=text_date_function,
         refusal=REFUSAL_MARKER,
     )
 

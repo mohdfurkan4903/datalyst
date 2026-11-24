@@ -12,9 +12,12 @@ from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
 import psycopg
+import pymysql
 import pytest
 from psycopg import sql
+from pymysql.constants import CLIENT
 
+from datalyst.connectors.mysql import MySQLDataSource
 from datalyst.connectors.postgres import PostgresDataSource
 from datalyst.metastore import Metastore
 
@@ -22,6 +25,7 @@ FIXTURES = Path(__file__).parents[1] / "fixtures"
 DEFAULT_ADMIN_URL = "postgresql://datalyst:datalyst@localhost:5434/datalyst"
 READ_ONLY_ROLE = "datalyst_test_ro"
 READ_ONLY_PASSWORD = "datalyst_test_ro"
+DEFAULT_MYSQL_ADMIN_URL = "mysql://root:datalyst@127.0.0.1:3307"
 
 
 @pytest.fixture(scope="session")
@@ -146,3 +150,63 @@ def metastore(metastore_url):
             )
             conn.execute("UPDATE settings_version SET version = 0")
         yield store
+
+
+def _mysql_connect(url: str, database: str | None = None) -> pymysql.Connection:
+    parts = urlsplit(url)
+    return pymysql.connect(
+        host=parts.hostname,
+        port=parts.port or 3306,
+        user=parts.username,
+        password=parts.password,
+        database=database,
+        autocommit=True,
+        connect_timeout=2,
+        client_flag=CLIENT.MULTI_STATEMENTS,
+    )
+
+
+@pytest.fixture(scope="session")
+def mysql_admin_url() -> str:
+    url = os.getenv("DATALYST_TEST_MYSQL_URL", DEFAULT_MYSQL_ADMIN_URL)
+    try:
+        _mysql_connect(url).close()
+    except pymysql.MySQLError as e:
+        pytest.skip(f"MySQL not reachable at {url} ({e}). Run: docker compose up -d")
+    return url
+
+
+@pytest.fixture(scope="session")
+def mysql_shop(mysql_admin_url):
+    """Owner and read-only logins to a MySQL copy of the shop sample database."""
+    name = f"datalyst_test_shop_{uuid.uuid4().hex[:8]}"
+    admin = _mysql_connect(mysql_admin_url)
+    cur = admin.cursor()
+    cur.execute(f"CREATE DATABASE `{name}`")
+    cur.execute(f"USE `{name}`")
+    cur.execute((FIXTURES / "shop_mysql.sql").read_text())
+    while cur.nextset():
+        pass
+    cur.execute(
+        f"CREATE USER IF NOT EXISTS '{READ_ONLY_ROLE}'@'%' "
+        f"IDENTIFIED BY '{READ_ONLY_PASSWORD}'"
+    )
+    cur.execute(f"GRANT SELECT ON `{name}`.* TO '{READ_ONLY_ROLE}'@'%'")
+    parts = urlsplit(mysql_admin_url)
+    host = f"{parts.hostname}:{parts.port}"
+    yield {
+        "database": name,
+        "owner": f"mysql://{parts.username}:{parts.password}@{host}/{name}",
+        "read_only": f"mysql://{READ_ONLY_ROLE}:{READ_ONLY_PASSWORD}@{host}/{name}",
+        "admin": admin,
+    }
+    cur.execute(f"DROP DATABASE IF EXISTS `{name}`")
+    admin.close()
+
+
+@pytest.fixture
+def mysql_source(mysql_shop):
+    with MySQLDataSource(
+        mysql_shop["read_only"], timeout_seconds=2, max_rows=50
+    ) as source:
+        yield source

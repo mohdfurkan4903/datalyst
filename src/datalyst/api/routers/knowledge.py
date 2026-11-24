@@ -78,7 +78,9 @@ def save_example(
         VerifiedQuery(
             question=question,
             sql=sql.strip().rstrip(";"),
-            tables=tables_in_sql(sql, schema),
+            tables=tables_in_sql(
+                sql, schema, analyst.sql_dialect, analyst.default_schema
+            ),
             created_by=author,
         ),
     )

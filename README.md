@@ -14,7 +14,7 @@ Bring your own model: OpenAI, Anthropic, Google Gemini, Groq, Ollama, LM Studio,
 - **Simple access control**: admins manage everything; each database is open to all users or only to the users an admin picks.
 - **Scales out**: stateless API and worker processes share one Postgres metastore.
 
-Supported data sources: PostgreSQL. More are on the [roadmap](#roadmap).
+Supported data sources: PostgreSQL and MySQL 8. More are on the [roadmap](#roadmap).
 
 ## Install
 
@@ -129,7 +129,7 @@ Datalyst is built for databases with hundreds or thousands of tables, including 
 
 - **Schema catalog.** Each database's structure is read once and stored in the metastore, shared by every user and process. Questions read it from there, not from the database. Each process keeps an in-memory copy and reloads it only when the catalog version changes.
 - **Staying in sync.** The worker checks every source on its own interval (5 minutes by default, set per source). A check is one query that hashes each table's columns, types, keys and comments; only tables whose hash changed are re-read. Added, altered and removed tables are logged, and descriptions of changed tables are marked stale for review. Several workers can run at once: jobs are claimed with `FOR UPDATE SKIP LOCKED`, failed jobs retry with backoff, and jobs left by a stopped worker are picked up again.
-- **Profiling.** The worker profiles each table from Postgres statistics and a small sample: null rate, distinct count, value range, examples, and a detected meaning such as email, URL, phone, UUID, country or currency code, yes/no flag, category, money, money in cents, percent, JSON (with its keys), or a date stored as text with its format (for example `YYYYMMDD`). Values of low-cardinality columns are indexed for trigram search, so words in a question can be matched to real values.
+- **Profiling.** The worker profiles each table from Postgres statistics (MySQL has none, so it uses a bounded sample) and a small sample: null rate, distinct count, value range, examples, and a detected meaning such as email, URL, phone, UUID, country or currency code, yes/no flag, category, money, money in cents, percent, JSON (with its keys), or a date stored as text with its format (for example `YYYYMMDD`). Values of low-cardinality columns are indexed for trigram search, so words in a question can be matched to real values.
 - **Relationship inference.** Many databases declare no foreign keys. Datalyst proposes joins from column naming (`cust_ref` to `cust_mstr.cust_id`, `mgr_emp_id` to `emp.emp_id`) and confirms each by checking that sampled values exist in the parent column. Each join gets a confidence; those at 0.8 or above are used. Declared keys are never overridden, and a join an admin rejects stays rejected. On the 40-table test database with no declared keys, it recovers all 42 true joins with no false ones.
 - **AI descriptions.** For undocumented tables, the worker asks the LLM to describe each table and column from the evidence above: what a row is, units, likely meanings of codes, synonyms and example questions. Human-written text always wins over database comments, which win over AI text. A table is described again only when its evidence changes. Per source, admins choose what may be sent: statistics, common values and 5 sample rows; statistics only; or names only.
 - **Finding the right tables.** Candidate tables come from several signals fused by rank: keyword search over names, descriptions and synonyms; meaning search over embeddings; tables whose values match words in the question; tables used by similar verified examples; and glossary terms. With many candidates the LLM picks the ones it needs, and the join graph adds the tables that connect them. Follow-up style questions are first rewritten into clear ones.
@@ -171,7 +171,7 @@ Requirements: Python 3.12+, [uv](https://docs.astral.sh/uv/) and Docker.
 uv sync --all-extras
 ```
 
-Start the one Postgres used for development and tests:
+Start the development Postgres (also the metastore) and MySQL used by the tests:
 
 ```bash
 docker compose up -d
@@ -199,7 +199,7 @@ uv run datalyst worker
 DATALYST_UI_API_URL=http://localhost:8000 uv run streamlit run ui/app.py
 ```
 
-Run the tests. Integration tests create throwaway databases on the development Postgres, including two sample databases loaded from `tests/fixtures`, and drop them afterwards:
+Run the tests. Integration tests create throwaway databases on the development Postgres and MySQL, including sample databases loaded from `tests/fixtures`, and drop them afterwards:
 
 ```bash
 uv run pytest
@@ -217,7 +217,8 @@ uv run ruff check . && uv run ruff format .
 src/datalyst/
 ├── core/          models, interfaces and exceptions
 ├── connectors/    data source implementations and the connector registry
-│   └── postgres/  connection pool, introspection, profiling queries, query validator
+│   ├── postgres/  connection pool, introspection, profiling queries, query validator
+│   └── mysql/     connections, introspection, profiling queries, query validator
 ├── metastore/     Postgres metastore: migrations and repositories
 ├── sync/          background worker, job handlers, incremental sync
 ├── enrichment/    profiling, relationship inference, AI descriptions, embeddings
@@ -235,7 +236,7 @@ deploy/            production compose file, Caddy config, env template
 docs/              deployment guide
 tests/             unit and integration tests, sample databases in fixtures/
 Dockerfile         one image for the API, worker and UI
-docker-compose.yml the development Postgres
+docker-compose.yml the development Postgres and MySQL
 ```
 
 New data sources plug in by implementing the `DataSource` interface and registering a URL scheme with `@register_connector`.
@@ -246,7 +247,7 @@ New data sources plug in by implementing the `DataSource` interface and register
 - Observability: OpenTelemetry tracing of every question, LLM call and query
 - Conversation memory and follow-up questions
 - Single sign-on (OIDC)
-- More data sources: CSV and Parquet upload, MySQL, MongoDB, Cassandra and others
+- More data sources: CSV and Excel upload, Parquet, MongoDB, Cassandra and others
 - MCP server
 
 ## Contributing

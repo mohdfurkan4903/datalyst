@@ -22,6 +22,12 @@ class QueryValidator(Protocol):
 class DataSource(ABC):
     dialect: str
     query_language: str
+    # sqlglot's name for the dialect, used to read the SQL the model writes.
+    sql_dialect: str = "postgres"
+    # Where a table named without a schema lives (public, or the MySQL database).
+    default_schema: str = "public"
+    # How the model should convert dates stored as text.
+    text_date_function: str = "to_date(column, 'FORMAT')"
 
     @abstractmethod
     def get_schema(self) -> DataSchema: ...

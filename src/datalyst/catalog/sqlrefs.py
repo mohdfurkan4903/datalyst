@@ -37,7 +37,9 @@ def referenced_tables(
 
 
 def resolve_tables(
-    refs: Iterable[tuple[str | None, str]], schema: DataSchema
+    refs: Iterable[tuple[str | None, str]],
+    schema: DataSchema,
+    default_schema: str = DEFAULT_SCHEMA,
 ) -> tuple[list[str], list[str]]:
     by_full = {t.qualified_name.lower(): t.qualified_name for t in schema.tables}
     by_name: dict[str, list[str]] = {}
@@ -49,7 +51,7 @@ def resolve_tables(
             match = by_full.get(f"{schema_name}.{name}".lower())
         else:
             options = by_name.get(name.lower(), [])
-            preferred = [o for o in options if o.startswith(f"{DEFAULT_SCHEMA}.")]
+            preferred = [o for o in options if o.startswith(f"{default_schema}.")]
             match = (
                 (preferred or options or [None])[0]
                 if len(options) <= 1 or preferred
@@ -62,15 +64,23 @@ def resolve_tables(
     return list(dict.fromkeys(found)), missing
 
 
-def tables_in_sql(sql: str, schema: DataSchema, dialect: str = "postgres") -> list[str]:
-    return resolve_tables(referenced_tables(sql, dialect), schema)[0]
+def tables_in_sql(
+    sql: str,
+    schema: DataSchema,
+    dialect: str = "postgres",
+    default_schema: str = DEFAULT_SCHEMA,
+) -> list[str]:
+    return resolve_tables(referenced_tables(sql, dialect), schema, default_schema)[0]
 
 
 def catalog_problems(
-    sql: str, schema: DataSchema, dialect: str = "postgres"
+    sql: str,
+    schema: DataSchema,
+    dialect: str = "postgres",
+    default_schema: str = DEFAULT_SCHEMA,
 ) -> list[str]:
     refs = referenced_tables(sql, dialect)
-    found, missing = resolve_tables(refs, schema)
+    found, missing = resolve_tables(refs, schema, default_schema)
     names = [t.qualified_name for t in schema.tables]
     problems = [
         f'Table "{name}" does not exist.{_suggest(name.split(".")[-1], names)}'
@@ -90,7 +100,7 @@ def catalog_problems(
             tree,
             schema=mapping,
             dialect=dialect,
-            db=DEFAULT_SCHEMA,
+            db=default_schema or None,
             validate_qualify_columns=True,
             quote_identifiers=False,
         )

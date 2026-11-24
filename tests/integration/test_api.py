@@ -222,6 +222,39 @@ def test_agent_repairs_unknown_tables_and_writes_are_refused(
     assert unsafe.status_code == 400
 
 
+def test_asking_a_mysql_source(api, admin, analyst, replies, mysql_shop):
+    created = api.post(
+        "/api/sources",
+        headers=admin,
+        json={"name": "mysql-shop", "url": mysql_shop["read_only"]},
+    )
+    assert created.status_code == 201, created.text
+    source = created.json()["id"]
+    assert created.json()["kind"] == "mysql"
+
+    replies(
+        sql_reply("SELECT COUNT(*) FROM `order_lines`"),
+        sql_reply("SELECT `status`, COUNT(*) AS n FROM `orders` GROUP BY `status`"),
+    )
+    answer = api.post(
+        f"/api/sources/{source}/ask",
+        headers=analyst,
+        json={"question": "Orders per status?"},
+    ).json()
+
+    assert answer["attempts"] == 2
+    assert answer["result"]["row_count"] == 4
+    assert "order_lines" in replies.llm.prompts[1]
+    assert mysql_shop["database"] + ".orders" in answer["tables"]
+    assert "MySQL" in replies.llm.prompts[0]
+    blocked = api.post(
+        f"/api/sources/{source}/query",
+        headers=analyst,
+        json={"sql": "SELECT SLEEP(5)"},
+    )
+    assert blocked.status_code == 400
+
+
 def test_history_feedback_and_promotion(api, admin, analyst, shop, replies):
     replies(sql_reply("SELECT count(*) AS orders FROM public.orders"))
     answer = api.post(

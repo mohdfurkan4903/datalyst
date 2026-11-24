@@ -186,7 +186,12 @@ class AnalystAgent:
             query = self._datasource.validate(state.get("query") or "")
         except UnsafeQueryError as e:
             return {"error": str(e), "error_kind": ErrorKind.UNSAFE}
-        if problems := catalog_problems(query, state["catalog"]):
+        if problems := catalog_problems(
+            query,
+            state["catalog"],
+            self._datasource.sql_dialect,
+            self._datasource.default_schema,
+        ):
             return {"error": " ".join(problems), "error_kind": ErrorKind.SCHEMA}
         return {"query": query}
 
@@ -199,7 +204,10 @@ class AnalystAgent:
 
     def _heal(self, state: AgentState) -> AgentState:
         query = state.get("query") or ""
-        found, missing = resolve_tables(referenced_tables(query), state["catalog"])
+        refs = referenced_tables(query, self._datasource.sql_dialect)
+        found, missing = resolve_tables(
+            refs, state["catalog"], self._datasource.default_schema
+        )
         assert self._healer is not None
         catalog = self._healer([*found, *missing])
         involved = [name for name in found if catalog.get_table(name)]
@@ -273,7 +281,10 @@ class AnalystAgent:
 
     def _initial_messages(self, state: AgentState) -> list[BaseMessage]:
         system = render_system_prompt(
-            self._datasource.dialect, self._datasource.query_language
+            self._datasource.dialect,
+            self._datasource.query_language,
+            default_schema=self._datasource.default_schema,
+            text_date_function=self._datasource.text_date_function,
         )
         user = USER_PROMPT.format(
             schema=state["schema"],
