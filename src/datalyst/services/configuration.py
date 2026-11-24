@@ -128,12 +128,7 @@ class ConfigService:
                 to_remove.add(name)
             else:
                 to_save[name] = value
-        self._metastore.settings.save(
-            to_save,
-            {item.name for item in OPTIONS if item.secret},
-            to_remove,
-            user_id,
-        )
+        self._metastore.settings.save(to_save, to_remove, user_id)
         self.refresh(force=True)
         return self.resolved()
 

@@ -1,5 +1,4 @@
 import time
-from collections.abc import Callable
 
 from datalyst.agent import AnalystAgent
 from datalyst.catalog import SchemaCatalog
@@ -7,12 +6,6 @@ from datalyst.catalog.sqlrefs import catalog_problems
 from datalyst.core.exceptions import UnsafeQueryError
 from datalyst.core.interfaces import DataSource
 from datalyst.core.models import AnalysisResult, DataSchema, QueryResult
-
-SchemaView = Callable[[DataSchema], DataSchema]
-
-
-def _everything(schema: DataSchema) -> DataSchema:
-    return schema
 
 
 class AnalystService:
@@ -23,14 +16,12 @@ class AnalystService:
         self._catalog = catalog
         self._agent = agent
 
-    def schema(
-        self, refresh: bool = False, view: SchemaView = _everything
-    ) -> DataSchema:
-        return view(self._catalog.get(refresh=refresh))
+    def schema(self, refresh: bool = False) -> DataSchema:
+        return self._catalog.get(refresh=refresh)
 
-    def ask(self, question: str, view: SchemaView = _everything) -> AnalysisResult:
+    def ask(self, question: str) -> AnalysisResult:
         start = time.perf_counter()
-        state = self._agent.run(question, view(self._catalog.get()))
+        state = self._agent.run(question, self._catalog.get())
         return AnalysisResult(
             question=question,
             query=state.get("query"),
@@ -42,9 +33,9 @@ class AnalystService:
             duration_ms=round((time.perf_counter() - start) * 1000, 2),
         )
 
-    def run_sql(self, sql: str, view: SchemaView = _everything) -> QueryResult:
+    def run_sql(self, sql: str) -> QueryResult:
         query = self._datasource.validate(sql)
-        if problems := catalog_problems(query, view(self._catalog.get())):
+        if problems := catalog_problems(query, self._catalog.get()):
             raise UnsafeQueryError(" ".join(problems))
         return self._datasource.execute(query)
 

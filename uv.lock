@@ -455,7 +455,6 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "argon2-cffi" },
-    { name = "cryptography" },
     { name = "email-validator" },
     { name = "fastapi" },
     { name = "langchain" },
@@ -498,7 +497,6 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "argon2-cffi", specifier = ">=25.1.0" },
-    { name = "cryptography", specifier = ">=50.0.2" },
     { name = "email-validator", specifier = ">=2.4.0" },
     { name = "fastapi", specifier = ">=0.165.0" },
     { name = "httpx", marker = "extra == 'ui'", specifier = ">=0.28.1" },

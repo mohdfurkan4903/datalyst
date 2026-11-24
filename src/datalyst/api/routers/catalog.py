@@ -6,7 +6,6 @@ from datalyst.api.schemas import (
     RelationshipCreate,
     RelationshipUpdate,
 )
-from datalyst.core.exceptions import NotFoundError
 from datalyst.core.models import ColumnRef, Table, TableRef
 
 router = APIRouter(prefix="/api/sources/{source_id}", tags=["catalog"])
@@ -19,11 +18,8 @@ def list_tables(source_id: int, user: CurrentUser, app: Services) -> list[Table]
 
 @router.get("/tables/{table}")
 def get_table(source_id: int, table: str, user: CurrentUser, app: Services) -> dict:
-    ref = _ref(table)
     user.require_source(source_id)
-    if not user.can_see(source_id, ref.qualified_name):
-        raise NotFoundError(f"Table {ref.qualified_name} is not in the catalog.")
-    return app.metastore.catalog.curation(source_id, ref)
+    return app.metastore.catalog.curation(source_id, _ref(table))
 
 
 @router.put("/tables/{table}/description", status_code=204)
@@ -55,12 +51,7 @@ def stale_descriptions(source_id: int, _: Admin, app: Services) -> list[dict]:
 @router.get("/relationships")
 def list_relationships(source_id: int, user: CurrentUser, app: Services) -> list[dict]:
     user.require_source(source_id)
-    return [
-        r
-        for r in app.metastore.catalog.relationships(source_id)
-        if user.can_see(source_id, r["child"].rsplit(".", 1)[0])
-        and user.can_see(source_id, r["parent"].rsplit(".", 1)[0])
-    ]
+    return app.metastore.catalog.relationships(source_id)
 
 
 @router.patch("/relationships/{relationship_id}", status_code=204)

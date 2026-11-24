@@ -17,7 +17,7 @@ class QuestionService:
         source = self._metastore.sources.get(source_id)
         analyst = self._registry.get(source)
         try:
-            result = analyst.ask(question, self._view(principal, source_id))
+            result = analyst.ask(question)
         except LLMError as e:
             failed = AnalysisResult(question=question, error=str(e), source=source.name)
             failed.id = self._metastore.history.record(
@@ -31,15 +31,9 @@ class QuestionService:
     def run_sql(self, principal: Principal, source_id: int, sql: str) -> QueryResult:
         principal.require_source(source_id)
         source = self._metastore.sources.get(source_id)
-        return self._registry.get(source).run_sql(sql, self._view(principal, source_id))
+        return self._registry.get(source).run_sql(sql)
 
     def schema(self, principal: Principal, source_id: int) -> DataSchema:
         principal.require_source(source_id)
         source = self._metastore.sources.get(source_id)
-        return self._registry.get(source).schema(view=self._view(principal, source_id))
-
-    def _view(self, principal: Principal, source_id: int):
-        def view(schema: DataSchema) -> DataSchema:
-            return principal.visible_schema(source_id, schema)
-
-        return view
+        return self._registry.get(source).schema()

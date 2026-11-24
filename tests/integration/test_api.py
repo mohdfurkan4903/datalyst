@@ -7,7 +7,6 @@ from datalyst.catalog import SchemaCatalog
 from datalyst.config import BootSettings
 from datalyst.connectors import create_datasource
 from datalyst.core.models import Role
-from datalyst.security import generate_secret_key
 from datalyst.services import AnalystRegistry, AnalystService, ConfigService
 from datalyst.sync import SourceSynchronizer
 from tests.unit.fakes import RecordingLLM, sql_reply
@@ -39,7 +38,7 @@ def config(metastore):
 
 @pytest.fixture
 def api(metastore, config, database_url, replies):
-    boot = BootSettings(_env_file=None, secret_key=generate_secret_key())
+    boot = BootSettings(_env_file=None)
 
     def factory(source):
         datasource = create_datasource(
@@ -92,25 +91,9 @@ def shop(api, admin):
     return response.json()["id"]
 
 
-def grant(api, admin, shop, patterns=None):
-    group = api.post("/api/groups", headers=admin, json={"name": "sales"}).json()
+def user_id(api, admin, email="analyst@example.com"):
     users = {u["email"]: u["id"] for u in api.get("/api/users", headers=admin).json()}
-    assert (
-        api.put(
-            f"/api/groups/{group['id']}/members/{users['analyst@example.com']}",
-            headers=admin,
-        ).status_code
-        == 204
-    )
-    assert (
-        api.put(
-            f"/api/groups/{group['id']}/sources/{shop}",
-            headers=admin,
-            json={"table_patterns": patterns},
-        ).status_code
-        == 204
-    )
-    return group["id"]
+    return users[email]
 
 
 def test_health_and_ready(api):
@@ -162,7 +145,16 @@ def test_source_creation_tests_the_connection(api, admin):
     assert unsupported.status_code == 400
 
 
-def test_sources_are_hidden_until_granted(api, admin, analyst, shop):
+def test_sources_can_be_limited_to_picked_users(api, admin, analyst, shop):
+    assert [s["name"] for s in api.get("/api/sources", headers=analyst).json()] == [
+        "shop"
+    ]
+    limited = api.put(
+        f"/api/sources/{shop}/access",
+        headers=admin,
+        json={"open_to_all": False, "user_ids": []},
+    )
+    assert limited.json() == {"open_to_all": False, "user_ids": []}
     assert api.get("/api/sources", headers=analyst).json() == []
     assert (
         api.post(
@@ -170,22 +162,33 @@ def test_sources_are_hidden_until_granted(api, admin, analyst, shop):
         ).status_code
         == 403
     )
+    assert (
+        api.put(
+            f"/api/sources/{shop}/access",
+            headers=analyst,
+            json={"open_to_all": True},
+        ).status_code
+        == 403
+    )
 
-    grant(api, admin, shop)
+    picked = user_id(api, admin)
+    api.put(
+        f"/api/sources/{shop}/access",
+        headers=admin,
+        json={"open_to_all": False, "user_ids": [picked]},
+    )
+    assert api.get(f"/api/sources/{shop}/access", headers=admin).json() == {
+        "open_to_all": False,
+        "user_ids": [picked],
+    }
+    assert len(api.get("/api/sources", headers=analyst).json()) == 1
 
-    assert [s["name"] for s in api.get("/api/sources", headers=analyst).json()] == [
-        "shop"
-    ]
 
-
-def test_table_grants_limit_what_the_agent_can_use(api, admin, analyst, shop, replies):
-    grant(api, admin, shop, ["public.orders"])
-    tables = api.get(f"/api/sources/{shop}/tables", headers=analyst).json()
-    assert [t["name"] for t in tables] == ["orders"]
-    assert tables[0]["foreign_keys"] == []
-
+def test_agent_repairs_unknown_tables_and_writes_are_refused(
+    api, analyst, shop, replies
+):
     replies(
-        sql_reply("SELECT count(*) FROM public.customers"),
+        sql_reply("SELECT count(*) FROM public.order_lines"),
         sql_reply("SELECT status, count(*) AS n FROM public.orders GROUP BY status"),
     )
     answer = api.post(
@@ -195,20 +198,15 @@ def test_table_grants_limit_what_the_agent_can_use(api, admin, analyst, shop, re
     ).json()
 
     assert answer["attempts"] == 2
-    assert answer["tables"] == ["public.orders"]
     assert answer["result"]["row_count"] == 4
-    assert (
-        "customers"
-        not in replies.llm.prompts[0].split("Question:")[0].split("Schema:")[1]
-    )
-    assert 'Table "public.customers" does not exist' in replies.llm.prompts[1]
+    assert 'Table "public.order_lines" does not exist' in replies.llm.prompts[1]
 
-    blocked = api.post(
+    unknown = api.post(
         f"/api/sources/{shop}/query",
         headers=analyst,
-        json={"sql": "SELECT * FROM public.customers"},
+        json={"sql": "SELECT * FROM public.nope"},
     )
-    assert blocked.status_code == 400
+    assert unknown.status_code == 400
     allowed = api.post(
         f"/api/sources/{shop}/query",
         headers=analyst,
@@ -224,7 +222,6 @@ def test_table_grants_limit_what_the_agent_can_use(api, admin, analyst, shop, re
 
 
 def test_history_feedback_and_promotion(api, admin, analyst, shop, replies):
-    grant(api, admin, shop)
     replies(sql_reply("SELECT count(*) AS orders FROM public.orders"))
     answer = api.post(
         f"/api/sources/{shop}/ask",
@@ -261,7 +258,6 @@ def test_history_feedback_and_promotion(api, admin, analyst, shop, replies):
 
 
 def test_declined_and_failed_answers_are_recorded(api, admin, analyst, shop, replies):
-    grant(api, admin, shop)
     replies("CANNOT_ANSWER: read-only access only")
     declined = api.post(
         f"/api/sources/{shop}/ask", headers=analyst, json={"question": "Delete orders"}
@@ -325,7 +321,6 @@ def test_curation(api, admin, shop):
 
 
 def test_glossary(api, admin, analyst, shop):
-    grant(api, admin, shop)
     saved = api.put(
         f"/api/sources/{shop}/glossary/revenue",
         headers=admin,
@@ -364,11 +359,8 @@ def test_password_change_and_deactivation_end_sessions(api, admin, analyst):
     assert api.get("/api/auth/me", headers=analyst).status_code == 401
 
     fresh = login(api, "analyst@example.com", "brand-new-password")
-    users = {u["email"]: u["id"] for u in api.get("/api/users", headers=admin).json()}
     api.patch(
-        f"/api/users/{users['analyst@example.com']}",
-        headers=admin,
-        json={"active": False},
+        f"/api/users/{user_id(api, admin)}", headers=admin, json={"active": False}
     )
     assert api.get("/api/auth/me", headers=fresh).status_code == 401
     assert (
@@ -425,7 +417,7 @@ def test_config_export_hides_secrets(api, admin):
 
     assert ini.status_code == 200
     assert "gsk-abc" not in ini.text and "gsk-abc" not in env.text
-    assert "[llm]" in ini.text and "secret_key = < hidden >" in ini.text
+    assert "[llm]" in ini.text and "api_key = < hidden >" in ini.text
     assert "attachment" in ini.headers["content-disposition"]
 
 

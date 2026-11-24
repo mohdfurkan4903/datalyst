@@ -17,7 +17,6 @@ from psycopg import sql
 
 from datalyst.connectors.postgres import PostgresDataSource
 from datalyst.metastore import Metastore
-from datalyst.security import SecretBox, generate_secret_key
 
 FIXTURES = Path(__file__).parents[1] / "fixtures"
 DEFAULT_ADMIN_URL = "postgresql://datalyst:datalyst@localhost:5434/datalyst"
@@ -138,11 +137,11 @@ def metastore_url(temporary_database) -> str:
 
 @pytest.fixture
 def metastore(metastore_url):
-    with Metastore.connect(metastore_url, SecretBox(generate_secret_key())) as store:
+    with Metastore.connect(metastore_url) as store:
         store.migrate()
         with store.pool.connection() as conn:
             conn.execute(
-                "TRUNCATE data_sources, sync_workers, users, groups, llm_usage, settings "
+                "TRUNCATE data_sources, sync_workers, users, llm_usage, settings "
                 "RESTART IDENTITY CASCADE"
             )
             conn.execute("UPDATE settings_version SET version = 0")

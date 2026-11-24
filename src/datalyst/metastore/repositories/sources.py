@@ -5,19 +5,17 @@ from psycopg_pool import ConnectionPool
 
 from datalyst.core.exceptions import ConfigurationError, NotFoundError
 from datalyst.core.models import DataSourceInfo, LLMDataPolicy, SourceStatus
-from datalyst.security import SecretBox
 
 _COLUMNS = """
-id, name, kind, include_schemas, llm_data_policy, sync_interval_seconds,
-catalog_version, status, status_detail, last_synced_at, last_checked_at,
-next_check_at, created_at
+id, name, kind, include_schemas, llm_data_policy, open_to_all,
+sync_interval_seconds, catalog_version, status, status_detail, last_synced_at,
+last_checked_at, next_check_at, created_at
 """
 
 
 class SourceRepository:
-    def __init__(self, pool: ConnectionPool, secrets: SecretBox | None) -> None:
+    def __init__(self, pool: ConnectionPool) -> None:
         self._pool = pool
-        self._secrets = secrets
 
     def create(
         self,
@@ -29,13 +27,12 @@ class SourceRepository:
         llm_data_policy: LLMDataPolicy = LLMDataPolicy.ROWS,
         sync_interval_seconds: int = 300,
     ) -> DataSourceInfo:
-        encrypted = self._box().encrypt(connection_url)
         try:
             with self._pool.connection() as conn:
                 row = conn.execute(
                     f"""
                     INSERT INTO data_sources (
-                        name, kind, connection_encrypted, include_schemas,
+                        name, kind, connection_url, include_schemas,
                         llm_data_policy, sync_interval_seconds
                     ) VALUES (%s, %s, %s, %s, %s, %s)
                     RETURNING {_COLUMNS}
@@ -43,7 +40,7 @@ class SourceRepository:
                     (
                         name,
                         kind,
-                        encrypted,
+                        connection_url,
                         include_schemas or [],
                         llm_data_policy.value,
                         sync_interval_seconds,
@@ -71,12 +68,12 @@ class SourceRepository:
     def connection_url(self, source_id: int) -> str:
         with self._pool.connection() as conn:
             row = conn.execute(
-                "SELECT connection_encrypted FROM data_sources WHERE id = %s",
+                "SELECT connection_url FROM data_sources WHERE id = %s",
                 (source_id,),
             ).fetchone()
         if row is None:
             raise NotFoundError(f"Data source {source_id} does not exist.")
-        return self._box().decrypt(row["connection_encrypted"])
+        return row["connection_url"]
 
     def update(self, source_id: int, **fields: Any) -> DataSourceInfo:
         allowed = {"include_schemas", "llm_data_policy", "sync_interval_seconds"}
@@ -107,10 +104,56 @@ class SourceRepository:
             conn.execute(
                 """
                 UPDATE data_sources
-                SET connection_encrypted = %s, updated_at = now() WHERE id = %s
+                SET connection_url = %s, updated_at = now() WHERE id = %s
                 """,
-                (self._box().encrypt(connection_url), source_id),
+                (connection_url, source_id),
             )
+
+    def access(self, source_id: int) -> tuple[bool, list[int]]:
+        """Whether every user may use the source, and the users picked otherwise."""
+        info = self.get(source_id)
+        with self._pool.connection() as conn:
+            rows = conn.execute(
+                "SELECT user_id FROM source_users WHERE source_id = %s ORDER BY user_id",
+                (source_id,),
+            ).fetchall()
+        return info.open_to_all, [row["user_id"] for row in rows]
+
+    def set_access(
+        self, source_id: int, open_to_all: bool, user_ids: list[int]
+    ) -> None:
+        with self._pool.connection() as conn, conn.transaction():
+            updated = conn.execute(
+                """
+                UPDATE data_sources SET open_to_all = %s, updated_at = now()
+                WHERE id = %s
+                """,
+                (open_to_all, source_id),
+            ).rowcount
+            if not updated:
+                raise NotFoundError(f"Data source {source_id} does not exist.")
+            conn.execute("DELETE FROM source_users WHERE source_id = %s", (source_id,))
+            try:
+                with conn.cursor() as cur:
+                    cur.executemany(
+                        "INSERT INTO source_users (source_id, user_id) VALUES (%s, %s)",
+                        [(source_id, user_id) for user_id in dict.fromkeys(user_ids)],
+                    )
+            except psycopg.errors.ForeignKeyViolation as e:
+                raise NotFoundError("One of those users does not exist.") from e
+
+    def usable_by(self, user_id: int) -> set[int]:
+        """Sources a non-admin user may use."""
+        with self._pool.connection() as conn:
+            rows = conn.execute(
+                """
+                SELECT id FROM data_sources WHERE open_to_all
+                UNION
+                SELECT source_id FROM source_users WHERE user_id = %s
+                """,
+                (user_id,),
+            ).fetchall()
+        return {row["id"] for row in rows}
 
     def set_status(
         self, source_id: int, status: SourceStatus, detail: str | None = None
@@ -178,11 +221,3 @@ class SourceRepository:
         if row is None:
             raise NotFoundError(f"Data source '{value}' does not exist.")
         return DataSourceInfo(**row)
-
-    def _box(self) -> SecretBox:
-        if self._secrets is None:
-            raise ConfigurationError(
-                "Set DATALYST_SECRET_KEY to store connection details. "
-                "Create one with: datalyst secret-key"
-            )
-        return self._secrets

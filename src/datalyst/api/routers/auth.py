@@ -43,7 +43,7 @@ def me(user: CurrentUser) -> dict:
     return {
         "user": user.user,
         "admin": user.is_admin,
-        "sources": sorted(user.grants) if not user.is_admin else None,
+        "sources": sorted(user.sources) if not user.is_admin else None,
     }
 
 

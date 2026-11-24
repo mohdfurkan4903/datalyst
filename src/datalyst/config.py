@@ -2,9 +2,9 @@
 
 Two kinds of configuration, following the approach Airflow takes:
 
-* ``BootSettings``: the two values a process needs before it can reach the
-  metastore (``DATALYST_METASTORE_URL`` and ``DATALYST_SECRET_KEY``), read from
-  the environment or a ``.env`` file.
+* ``BootSettings``: what a process needs before it can reach the metastore,
+  mainly ``DATALYST_METASTORE_URL``, read from the environment or a ``.env``
+  file.
 * ``Settings``: everything else (LLM provider and keys, retrieval, sync, ...),
   stored in the metastore and edited by admins on the Settings page. Any option
   can be pinned with an environment variable ``DATALYST__<SECTION>__<KEY>``, which
@@ -37,7 +37,6 @@ class BootSettings(BaseSettings):
     )
 
     metastore_url: str | None = None
-    secret_key: SecretStr | None = None
     metastore_pool_min_size: int = Field(default=1, ge=0)
     metastore_pool_max_size: int = Field(default=10, ge=1)
 
@@ -47,13 +46,6 @@ class BootSettings(BaseSettings):
                 "Set DATALYST_METASTORE_URL to the metastore's address."
             )
         return self.metastore_url
-
-    def require_secret_key(self) -> str:
-        if self.secret_key is None:
-            raise ConfigurationError(
-                "Set DATALYST_SECRET_KEY. Create one with: datalyst secret-key"
-            )
-        return self.secret_key.get_secret_value()
 
 
 @lru_cache
@@ -372,18 +364,13 @@ def export_ini(
     lines: list[str] = []
     if boot is not None and section in (None, "core"):
         lines += ["[core]"]
-        for key, value, var in (
-            ("metastore_url", boot.metastore_url, "DATALYST_METASTORE_URL"),
-            ("secret_key", boot.secret_key, "DATALYST_SECRET_KEY"),
-        ):
-            if include_descriptions:
-                lines.append(f"# Set with the {var} environment variable.")
-            shown = HIDDEN if value and not include_secrets else _ini_value(value)
-            if key == "metastore_url" and value and not include_secrets:
-                shown = _mask_url(str(value))
-            lines.append(
-                f"{key} = {shown}" + (" # source: env" if include_sources else "")
-            )
+        if include_descriptions:
+            lines.append("# Set with the DATALYST_METASTORE_URL environment variable.")
+        value = boot.metastore_url
+        shown = _mask_url(value) if value and not include_secrets else _ini_value(value)
+        lines.append(
+            f"metastore_url = {shown}" + (" # source: env" if include_sources else "")
+        )
         lines.append("")
     for name, title in SECTIONS.items():
         if section not in (None, name):

@@ -19,17 +19,17 @@ class TokenClaims(BaseModel):
     expires_at: datetime
 
 
-def signing_key(secret_key: str) -> str:
-    return hashlib.sha256(f"datalyst-auth:{secret_key}".encode()).hexdigest()
+def signing_key(key: str) -> str:
+    return hashlib.sha256(f"datalyst-auth:{key}".encode()).hexdigest()
 
 
 class TokenService:
     def __init__(
         self,
-        secret_key: str,
+        key: str,
         lifetime: timedelta | Callable[[], timedelta] = timedelta(hours=8),
     ) -> None:
-        self._key = signing_key(secret_key)
+        self._key = signing_key(key)
         self._lifetime = lifetime
 
     @property

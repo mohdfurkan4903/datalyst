@@ -19,7 +19,7 @@ def test_defaults_until_an_admin_changes_something(config):
     assert {row["source"] for row in config.describe()} == {"default"}
 
 
-def test_update_stores_values_and_encrypts_secrets(config, metastore):
+def test_update_stores_values_and_never_returns_secrets(config, metastore):
     config.update(
         {"llm.provider": "groq", "llm.api_key": "gsk-123", "sync.batch_size": "50"}
     )
@@ -27,12 +27,6 @@ def test_update_stores_values_and_encrypts_secrets(config, metastore):
     assert config.current().llm_provider == "groq"
     assert config.current().llm_api_key.get_secret_value() == "gsk-123"
     assert config.current().sync_batch_size == 50
-    with metastore.pool.connection() as conn:
-        row = conn.execute(
-            "SELECT value, encrypted FROM settings WHERE name = 'llm.api_key'"
-        ).fetchone()
-    assert row["value"] is None
-    assert "gsk-123" not in row["encrypted"]
     described = {row["name"]: row for row in config.describe()}
     assert described["llm.api_key"]["value"] is None
     assert described["llm.api_key"]["is_set"] is True

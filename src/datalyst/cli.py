@@ -26,7 +26,7 @@ from datalyst.config import (
 )
 from datalyst.core.exceptions import ConfigurationError, DatalystError
 from datalyst.metastore import Metastore
-from datalyst.security import generate_secret_key, hash_password
+from datalyst.security import hash_password
 from datalyst.services import ConfigService
 
 app = typer.Typer(
@@ -90,11 +90,6 @@ def worker(
         for sig in (signal.SIGINT, signal.SIGTERM):
             signal.signal(sig, lambda *_: stop.set())
         sync_worker.run(stop)
-
-
-@app.command("secret-key", help="Print a new key for DATALYST_SECRET_KEY.")
-def secret_key() -> None:
-    typer.echo(generate_secret_key())
 
 
 @app.command(

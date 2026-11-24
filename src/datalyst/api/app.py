@@ -39,7 +39,7 @@ def build_services(
     return AppServices(
         metastore=metastore,
         config=config,
-        auth=build_auth(boot, metastore, config),
+        auth=build_auth(metastore, config),
         registry=registry,
         questions=QuestionService(metastore, registry),
         boot=boot,
@@ -54,7 +54,6 @@ def create_app(services: AppServices | None = None) -> FastAPI:
             from datalyst.bootstrap import open_ready_metastore
 
             boot = get_boot_settings()
-            boot.require_secret_key()
             metastore = open_ready_metastore(boot)
             app.state.services = build_services(boot, metastore)
         else:

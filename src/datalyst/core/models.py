@@ -227,6 +227,7 @@ class DataSourceInfo(BaseModel):
     kind: str
     include_schemas: list[str] = Field(default_factory=list)
     llm_data_policy: LLMDataPolicy = LLMDataPolicy.ROWS
+    open_to_all: bool = True
     sync_interval_seconds: int = 300
     catalog_version: int = 0
     status: SourceStatus = SourceStatus.NEW
@@ -358,13 +359,6 @@ class User(BaseModel):
     token_version: int = 0
     created_at: datetime | None = None
     last_login_at: datetime | None = None
-
-
-class Group(BaseModel):
-    id: int
-    name: str
-    members: list[int] = Field(default_factory=list)
-    grants: dict[int, list[str] | None] = Field(default_factory=dict)
 
 
 class HistoryEntry(BaseModel):

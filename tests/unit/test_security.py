@@ -1,3 +1,4 @@
+import secrets
 from datetime import timedelta
 from decimal import Decimal
 
@@ -28,9 +29,7 @@ from datalyst.core.models import (
 from datalyst.security import (
     Principal,
     TokenService,
-    generate_secret_key,
     hash_password,
-    merge_grants,
     verify_password,
 )
 from datalyst.security.tokens import signing_key
@@ -54,7 +53,7 @@ def test_short_passwords_are_rejected():
 
 
 def test_tokens_round_trip():
-    tokens = TokenService(generate_secret_key())
+    tokens = TokenService(secrets.token_hex(32))
 
     claims = tokens.verify(tokens.issue(ANALYST))
 
@@ -62,12 +61,12 @@ def test_tokens_round_trip():
 
 
 def test_expired_tampered_and_foreign_tokens_are_rejected():
-    secret = generate_secret_key()
+    secret = secrets.token_hex(32)
     expired = TokenService(secret, timedelta(seconds=-1)).issue(ANALYST)
     with pytest.raises(AuthenticationError, match="expired"):
         TokenService(secret).verify(expired)
 
-    other = TokenService(generate_secret_key()).issue(ANALYST)
+    other = TokenService(secrets.token_hex(32)).issue(ANALYST)
     with pytest.raises(AuthenticationError, match="Invalid"):
         TokenService(secret).verify(other)
 
@@ -100,49 +99,22 @@ def names(schema):
     return [t.qualified_name for t in schema.tables]
 
 
-def test_admins_see_everything():
+def test_admins_use_every_source():
     principal = Principal(user=ADMIN)
 
     assert principal.can_use(99)
-    assert principal.visible_schema(99, SCHEMA) is SCHEMA
+    principal.require_admin()
 
 
-def test_analysts_only_use_granted_sources():
-    principal = Principal(user=ANALYST, grants={1: None})
+def test_users_only_use_sources_opened_to_them():
+    principal = Principal(user=ANALYST, sources=frozenset({1}))
 
     assert principal.can_use(1)
     assert not principal.can_use(2)
-    assert principal.visible_schema(1, SCHEMA) is SCHEMA
     with pytest.raises(PermissionDeniedError):
         principal.require_source(2)
     with pytest.raises(PermissionDeniedError):
         principal.require_admin()
-
-
-def test_table_patterns_hide_tables_and_joins_to_them():
-    principal = Principal(user=ANALYST, grants={1: ("public.order*",)})
-
-    visible = principal.visible_schema(1, SCHEMA)
-
-    assert names(visible) == ["public.orders", "public.order_items"]
-    assert visible.tables[0].foreign_keys == []
-    assert SCHEMA.tables[0].foreign_keys
-    assert not principal.can_see(1, "hr.salaries")
-    assert principal.can_see(1, "PUBLIC.ORDERS")
-
-
-def test_merge_grants_unions_patterns_and_full_access_wins():
-    merged = merge_grants(
-        [
-            (1, ["public.a*"]),
-            (1, ["public.b*", "public.a*"]),
-            (2, ["x.*"]),
-            (2, None),
-            (2, ["y"]),
-        ]
-    )
-
-    assert merged == {1: ("public.a*", "public.b*"), 2: None}
 
 
 @pytest.mark.parametrize(
@@ -167,3 +139,4 @@ def test_query_results_serialize_to_plain_json():
 
     assert result.model_dump(mode="json")["rows"] == [[1.25]]
     assert result.rows == [[Decimal("1.25")]]
+

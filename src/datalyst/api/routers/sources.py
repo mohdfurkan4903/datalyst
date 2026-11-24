@@ -1,7 +1,7 @@
 from fastapi import APIRouter
 
 from datalyst.api.deps import Admin, CurrentUser, Services
-from datalyst.api.schemas import SourceCreate, SourceUpdate
+from datalyst.api.schemas import SourceAccess, SourceCreate, SourceUpdate
 from datalyst.connectors import create_datasource, datasource_kind
 from datalyst.core.models import DataSourceInfo
 from datalyst.sync import check_source_request, describe_source_request
@@ -54,6 +54,21 @@ def update_source(
 def delete_source(source_id: int, _: Admin, app: Services) -> None:
     app.registry.forget(source_id)
     app.metastore.sources.delete(source_id)
+
+
+@router.get("/{source_id}/access")
+def get_access(source_id: int, _: Admin, app: Services) -> SourceAccess:
+    open_to_all, user_ids = app.metastore.sources.access(source_id)
+    return SourceAccess(open_to_all=open_to_all, user_ids=user_ids)
+
+
+@router.put("/{source_id}/access")
+def set_access(
+    source_id: int, body: SourceAccess, _: Admin, app: Services
+) -> SourceAccess:
+    """Let every user use the source, or only the users listed."""
+    app.metastore.sources.set_access(source_id, body.open_to_all, body.user_ids)
+    return get_access(source_id, _, app)
 
 
 @router.post("/{source_id}/sync", status_code=202)

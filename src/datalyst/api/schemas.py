@@ -30,6 +30,11 @@ class SourceCreate(BaseModel):
     sync_interval_seconds: int = Field(default=300, ge=60)
 
 
+class SourceAccess(BaseModel):
+    open_to_all: bool = True
+    user_ids: list[int] = Field(default_factory=list)
+
+
 class SourceUpdate(BaseModel):
     url: str | None = None
     include_schemas: list[str] | None = None
@@ -85,14 +90,6 @@ class UserUpdate(BaseModel):
     role: Role | None = None
     active: bool | None = None
     password: str | None = None
-
-
-class GroupCreate(BaseModel):
-    name: str = Field(min_length=1, max_length=100)
-
-
-class GrantUpdate(BaseModel):
-    table_patterns: list[str] | None = None
 
 
 class SetupRequest(BaseModel):

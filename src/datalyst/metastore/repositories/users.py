@@ -2,7 +2,7 @@ import psycopg
 from psycopg_pool import ConnectionPool
 
 from datalyst.core.exceptions import ConfigurationError, NotFoundError
-from datalyst.core.models import Group, Role, User
+from datalyst.core.models import Role, User
 
 SETUP_LOCK = 7_210_418_001
 _COLUMNS = "id, email, name, role, active, token_version, created_at, last_login_at"
@@ -155,110 +155,3 @@ class UserRepository:
         if row is None:
             raise NotFoundError(f"User '{value}' does not exist.")
         return User(**row)
-
-
-class GroupRepository:
-    def __init__(self, pool: ConnectionPool) -> None:
-        self._pool = pool
-
-    def create(self, name: str) -> Group:
-        try:
-            with self._pool.connection() as conn:
-                row = conn.execute(
-                    "INSERT INTO groups (name) VALUES (%s) RETURNING id, name",
-                    (name.strip(),),
-                ).fetchone()
-        except psycopg.errors.UniqueViolation as e:
-            raise ConfigurationError(f"A group named '{name}' exists.") from e
-        return Group(**row)
-
-    def all(self) -> list[Group]:
-        with self._pool.connection() as conn:
-            groups = conn.execute(
-                "SELECT id, name FROM groups ORDER BY name"
-            ).fetchall()
-            members = conn.execute(
-                "SELECT group_id, user_id FROM group_members"
-            ).fetchall()
-            grants = conn.execute(
-                "SELECT group_id, source_id, table_patterns FROM source_grants"
-            ).fetchall()
-        result = {row["id"]: Group(**row) for row in groups}
-        for row in members:
-            result[row["group_id"]].members.append(row["user_id"])
-        for row in grants:
-            result[row["group_id"]].grants[row["source_id"]] = row["table_patterns"]
-        return list(result.values())
-
-    def get(self, group_id: int) -> Group:
-        for group in self.all():
-            if group.id == group_id:
-                return group
-        raise NotFoundError(f"Group {group_id} does not exist.")
-
-    def get_by_name(self, name: str) -> Group:
-        for group in self.all():
-            if group.name == name:
-                return group
-        raise NotFoundError(f"Group '{name}' does not exist.")
-
-    def delete(self, group_id: int) -> None:
-        with self._pool.connection() as conn:
-            if not conn.execute(
-                "DELETE FROM groups WHERE id = %s", (group_id,)
-            ).rowcount:
-                raise NotFoundError(f"Group {group_id} does not exist.")
-
-    def add_member(self, group_id: int, user_id: int) -> None:
-        try:
-            with self._pool.connection() as conn:
-                conn.execute(
-                    "INSERT INTO group_members VALUES (%s, %s) ON CONFLICT DO NOTHING",
-                    (group_id, user_id),
-                )
-        except psycopg.errors.ForeignKeyViolation as e:
-            raise NotFoundError("That group or user does not exist.") from e
-
-    def remove_member(self, group_id: int, user_id: int) -> None:
-        with self._pool.connection() as conn:
-            conn.execute(
-                "DELETE FROM group_members WHERE group_id = %s AND user_id = %s",
-                (group_id, user_id),
-            )
-
-    def grant(
-        self, group_id: int, source_id: int, table_patterns: list[str] | None
-    ) -> None:
-        try:
-            with self._pool.connection() as conn:
-                conn.execute(
-                    """
-                    INSERT INTO source_grants (group_id, source_id, table_patterns)
-                    VALUES (%s, %s, %s)
-                    ON CONFLICT (group_id, source_id) DO UPDATE
-                    SET table_patterns = excluded.table_patterns
-                    """,
-                    (group_id, source_id, table_patterns),
-                )
-        except psycopg.errors.ForeignKeyViolation as e:
-            raise NotFoundError("That group or data source does not exist.") from e
-
-    def revoke(self, group_id: int, source_id: int) -> None:
-        with self._pool.connection() as conn:
-            conn.execute(
-                "DELETE FROM source_grants WHERE group_id = %s AND source_id = %s",
-                (group_id, source_id),
-            )
-
-    def grants_for(self, user_id: int) -> list[tuple[int, list[str] | None]]:
-        with self._pool.connection() as conn:
-            rows = conn.execute(
-                """
-                SELECT g.source_id, g.table_patterns
-                FROM source_grants g
-                JOIN group_members m ON m.group_id = g.group_id
-                WHERE m.user_id = %s
-                """,
-                (user_id,),
-            ).fetchall()
-        return [(row["source_id"], row["table_patterns"]) for row in rows]

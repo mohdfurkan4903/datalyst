@@ -12,7 +12,7 @@ from datalyst.core.interfaces import CatalogIntrospector, DataSource
 from datalyst.core.models import DataSchema, DataSourceInfo, TableRef
 from datalyst.llm import create_chat_model, create_embeddings, embedding_model_name
 from datalyst.metastore import Metastore
-from datalyst.security import SecretBox, TokenService
+from datalyst.security import TokenService
 from datalyst.services import (
     AnalystRegistry,
     AnalystService,
@@ -32,10 +32,8 @@ logger = logging.getLogger(__name__)
 
 
 def open_metastore(boot: BootSettings) -> Metastore:
-    secrets = SecretBox(boot.secret_key.get_secret_value()) if boot.secret_key else None
     return Metastore.connect(
         boot.require_metastore_url(),
-        secrets,
         min_size=boot.metastore_pool_min_size,
         max_size=boot.metastore_pool_max_size,
     )
@@ -205,17 +203,15 @@ def _model_label(settings: Settings) -> str:
     return f"{settings.llm_provider}:{settings.llm_model}"
 
 
-def build_tokens(boot: BootSettings, config: ConfigService) -> TokenService:
+def build_tokens(metastore: Metastore, config: ConfigService) -> TokenService:
     return TokenService(
-        boot.require_secret_key(),
+        metastore.signing_key(),
         lambda: timedelta(minutes=config.current().auth_token_minutes),
     )
 
 
-def build_auth(
-    boot: BootSettings, metastore: Metastore, config: ConfigService
-) -> AuthService:
-    return AuthService(metastore, build_tokens(boot, config))
+def build_auth(metastore: Metastore, config: ConfigService) -> AuthService:
+    return AuthService(metastore, build_tokens(metastore, config))
 
 
 def build_registry(metastore: Metastore, config: ConfigService) -> AnalystRegistry:

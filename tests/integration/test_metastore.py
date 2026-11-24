@@ -11,7 +11,6 @@ from datalyst.core.models import (
     Table,
     TableRef,
 )
-from datalyst.metastore import Metastore
 from datalyst.sync import SourceSynchronizer
 
 pytestmark = pytest.mark.integration
@@ -41,16 +40,6 @@ def test_create_and_read_source(metastore):
     assert metastore.sources.connection_url(created.id) == URL
 
 
-def test_connection_url_is_encrypted_at_rest(metastore):
-    add(metastore)
-
-    with metastore.pool.connection() as conn:
-        stored = conn.execute(
-            "SELECT connection_encrypted FROM data_sources"
-        ).fetchone()
-    assert "topsecret" not in stored["connection_encrypted"]
-
-
 def test_duplicate_and_invalid_names_are_rejected(metastore):
     add(metastore)
 
@@ -73,16 +62,30 @@ def test_update_and_delete_source(metastore):
         metastore.sources.get(source.id)
 
 
-def test_reading_url_without_secret_key_is_a_configuration_error(
-    metastore_url, metastore
-):
+def test_source_access_is_open_or_limited_to_picked_users(metastore):
     source = add(metastore)
+    other = add(metastore, name="hr")
+    user = metastore.users.create("u@x.io", "hash")
 
-    with (
-        Metastore.connect(metastore_url) as keyless,
-        pytest.raises(ConfigurationError, match="SECRET_KEY"),
-    ):
-        keyless.sources.connection_url(source.id)
+    assert metastore.sources.access(source.id) == (True, [])
+    assert metastore.sources.usable_by(user.id) == {source.id, other.id}
+
+    metastore.sources.set_access(other.id, False, [])
+    assert metastore.sources.usable_by(user.id) == {source.id}
+
+    metastore.sources.set_access(other.id, False, [user.id, user.id])
+    assert metastore.sources.access(other.id) == (False, [user.id])
+    assert metastore.sources.usable_by(user.id) == {source.id, other.id}
+
+    with pytest.raises(NotFoundError):
+        metastore.sources.set_access(other.id, False, [9999])
+
+
+def test_signing_key_is_created_once(metastore):
+    key = metastore.signing_key()
+
+    assert len(key) == 64
+    assert metastore.signing_key() == key
 
 
 def shop(*, with_orders=True, extra_column=False):

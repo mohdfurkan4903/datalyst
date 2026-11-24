@@ -5,7 +5,6 @@ from datalyst.security import (
     Principal,
     TokenService,
     hash_password,
-    merge_grants,
     needs_rehash,
     verify_password,
 )
@@ -56,12 +55,12 @@ class AuthService:
         return self.principal(user)
 
     def principal(self, user: User) -> Principal:
-        grants = (
-            {}
+        sources = (
+            frozenset()
             if user.role == Role.ADMIN
-            else merge_grants(self._metastore.groups.grants_for(user.id))
+            else frozenset(self._metastore.sources.usable_by(user.id))
         )
-        return Principal(user=user, grants=grants)
+        return Principal(user=user, sources=sources)
 
     def change_password(self, user: User, current: str, new: str) -> None:
         found = self._metastore.users.credentials(user.email)

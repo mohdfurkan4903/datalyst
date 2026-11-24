@@ -6,12 +6,11 @@ from datalyst.metastore.repositories.knowledge import KnowledgeRepository
 from datalyst.metastore.repositories.settings import SettingsRepository
 from datalyst.metastore.repositories.sources import SourceRepository
 from datalyst.metastore.repositories.usage import UsageRepository
-from datalyst.metastore.repositories.users import GroupRepository, UserRepository
+from datalyst.metastore.repositories.users import UserRepository
 
 __all__ = [
     "CatalogRepository",
     "EmbeddingRepository",
-    "GroupRepository",
     "HistoryRepository",
     "JobRepository",
     "KnowledgeRepository",
