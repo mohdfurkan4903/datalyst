@@ -3,7 +3,7 @@ import plotly.express as px
 import streamlit as st
 
 from ui.charts import choose_chart
-from ui.session import call, client, is_admin
+from ui.session import call, client, is_admin, succeeded
 
 
 def result_frame(result: dict) -> pd.DataFrame:
@@ -69,7 +69,7 @@ def feedback_bar(entry_id: int, key: str, can_promote: bool) -> None:
         (columns[1], -1, "👎 Wrong", "This answer is wrong"),
     ):
         clicked = column.button(icon, key=f"feedback-{value}-{key}", help=hint)
-        if clicked and call(lambda v=value: client().feedback(entry_id, v)) is None:
+        if clicked and succeeded(lambda v=value: client().feedback(entry_id, v)):
             given[entry_id] = value
     if (
         is_admin()

@@ -23,33 +23,46 @@ SOURCE_NOTES = {
 }
 
 
+MAIN_SECTIONS = ("llm", "embeddings")
+
+
 def render() -> None:
     st.title("Settings")
     if st.session_state.pop("welcome", False):
         st.success(
-            "Datalyst is set up. Choose the model that answers questions and add its "
-            "API key, then add a database under **Data sources**."
+            "Datalyst is set up. Choose the AI model and add its API key, then add "
+            "a database under **Data sources**."
         )
-    st.caption(
-        "Changes apply to every server and worker within a few seconds; no restart "
-        "needed. An option set by an environment variable (`DATALYST__SECTION__KEY`) "
-        "wins over the value here and is locked."
-    )
     rows = call(client().settings)
     if rows is None:
         return
-    _downloads()
-
     by_section: dict[str, list[dict]] = {}
     for row in rows:
         by_section.setdefault(row["section"], []).append(row)
-    tabs = st.tabs([TABS.get(name, name) for name in by_section])
-    for tab, (section, options) in zip(tabs, by_section.items(), strict=True):
+
+    main = [name for name in MAIN_SECTIONS if name in by_section]
+    advanced = [name for name in by_section if name not in MAIN_SECTIONS]
+    tabs = st.tabs([*(TABS.get(name, name) for name in main), "Advanced"])
+    for tab, section in zip(tabs, main, strict=False):
         with tab:
-            st.caption(options[0]["section_title"])
-            _section_form(section, options)
-            if section in TESTABLE:
-                _test_button(section)
+            _section(section, by_section[section])
+    with tabs[-1]:
+        st.caption(
+            "Changes apply within a few seconds, with no restart. An option set by "
+            "an environment variable (`DATALYST__SECTION__KEY`) is locked here."
+        )
+        for section in advanced:
+            st.subheader(TABS.get(section, section))
+            _section(section, by_section[section])
+        st.subheader("Export")
+        _downloads()
+
+
+def _section(section: str, options: list[dict]) -> None:
+    st.caption(options[0]["section_title"])
+    _section_form(section, options)
+    if section in TESTABLE:
+        _test_button(section)
 
 
 def _downloads() -> None:

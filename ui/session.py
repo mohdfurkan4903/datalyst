@@ -54,16 +54,25 @@ def needs_setup() -> bool:
 
 
 def sign_out() -> None:
+    # The browser cookie is cleared by script, but st.context.cookies keeps the
+    # value from page load until the page reloads; remember it so it is not
+    # used to sign the same person back in.
+    ended = st.context.cookies.get(SESSION_COOKIE)
     for key in list(st.session_state.keys()):
         del st.session_state[key]
     st.session_state.cookie = ("", 0)
+    st.session_state.ended_token = ended
 
 
 def restore_session() -> None:
     if signed_in():
         return
     token = st.context.cookies.get(SESSION_COOKIE)
-    if not token or st.session_state.get("cookie") == ("", 0):
+    if (
+        not token
+        or token == st.session_state.get("ended_token")
+        or st.session_state.get("cookie") == ("", 0)
+    ):
         return
     session = client()
     session.token = token
@@ -108,12 +117,22 @@ def call(action: Callable[[], Any], success: str | None = None) -> Any:
     return result
 
 
+def succeeded(action: Callable[[], Any], success: str | None = None) -> bool:
+    """Run an action that returns nothing; True when the server accepted it."""
+    outcome = call(lambda: action() or True, success)
+    return outcome is not None
+
+
 def pick_source(key: str = "source") -> dict | None:
     sources = call(client().sources) or []
     if not sources:
         st.info(
             "No data sources available yet."
-            + (" Add one under Sources." if is_admin() else " Ask an admin for access.")
+            + (
+                " Add one under Data sources."
+                if is_admin()
+                else " Ask an admin for access."
+            )
         )
         return None
     names = [s["name"] for s in sources]

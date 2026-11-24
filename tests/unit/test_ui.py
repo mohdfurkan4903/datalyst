@@ -99,12 +99,17 @@ def test_api_errors_carry_status_and_message():
     assert caught.value.message == "Sign in first."
 
 
-def test_validation_errors_are_readable():
-    def handler(request):
-        return httpx.Response(422, json={"detail": [{"msg": "field required"}]})
+def test_raw_error_bodies_are_never_shown():
+    def page(request):
+        return httpx.Response(
+            502, text="<html>Traceback (most recent call last)</html>"
+        )
 
-    with pytest.raises(ApiError, match="field required"):
-        make_client(handler).ask(1, "")
+    with pytest.raises(ApiError) as caught:
+        make_client(page).sources()
+
+    assert caught.value.status == 502
+    assert "Traceback" not in caught.value.message
 
 
 def test_no_content_and_unreachable_server():
@@ -115,14 +120,3 @@ def test_no_content_and_unreachable_server():
 
     with pytest.raises(ApiError, match="Cannot reach"):
         make_client(down).sources()
-
-
-def test_path_parts_are_escaped():
-    paths = []
-
-    def handler(request):
-        paths.append(request.url.raw_path.decode())
-        return httpx.Response(204)
-
-    make_client(handler).set_column_description(1, "public.ord hdr", "a/b", "x")
-    assert paths == ["/api/sources/1/tables/public.ord%20hdr/columns/a%2Fb/description"]

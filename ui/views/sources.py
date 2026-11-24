@@ -1,43 +1,52 @@
 import pandas as pd
 import streamlit as st
 
-from ui.session import call, client
+from ui.session import call, client, succeeded
 
 POLICIES = {
     "rows": "Statistics, common values and a few sample rows (best descriptions)",
     "stats": "Statistics and common values, no rows",
     "names": "Table and column names only, no data",
 }
-STATUS_COLORS = {"ready": "🟢", "error": "🔴", "new": "🟡", "syncing": "🟡"}
+STATUS = {
+    "ready": "🟢 Ready",
+    "error": "🔴 Error",
+    "new": "🟡 New",
+    "syncing": "🟡 Syncing",
+}
 
 
 def render() -> None:
     st.title("Data sources")
     sources = call(client().sources) or []
     if sources:
-        st.dataframe(
-            pd.DataFrame(
-                [
-                    {
-                        "Name": s["name"],
-                        "Status": f"{STATUS_COLORS.get(s['status'], '')} {s['status']}",
-                        "Schemas": ", ".join(s["include_schemas"]) or "all",
-                        "Data sent to LLM": s["llm_data_policy"],
-                        "Last checked": _time(s.get("last_checked_at")),
-                        "Last change": _time(s.get("last_synced_at")),
-                    }
-                    for s in sources
-                ]
-            ),
-            width="stretch",
-            hide_index=True,
-        )
+        _table(sources)
         names = [s["name"] for s in sources]
-        chosen = st.selectbox("Manage", names)
+        chosen = st.selectbox("Manage a source", names)
         _manage(next(s for s in sources if s["name"] == chosen))
     else:
         st.info("No data sources yet. Add your first database below.")
-    _add_form()
+    _add_source()
+
+
+def _table(sources: list[dict]) -> None:
+    st.dataframe(
+        pd.DataFrame(
+            [
+                {
+                    "Name": s["name"],
+                    "Status": STATUS.get(s["status"], s["status"]),
+                    "Who can use it": "All users"
+                    if s["open_to_all"]
+                    else "Selected users",
+                    "Last checked": _time(s.get("last_checked_at")),
+                }
+                for s in sources
+            ]
+        ),
+        width="stretch",
+        hide_index=True,
+    )
 
 
 def _manage(source: dict) -> None:
@@ -45,95 +54,83 @@ def _manage(source: dict) -> None:
     info = status.get("source", source)
     if info.get("status_detail"):
         st.error(info["status_detail"])
-    jobs = status.get("jobs", {})
-    metrics = st.columns(4)
-    metrics[0].metric("Catalog version", info.get("catalog_version", 0))
-    metrics[1].metric("Queued jobs", jobs.get("queued", 0))
-    metrics[2].metric("Failed jobs", jobs.get("failed", 0))
-    metrics[3].metric("Workers running", len(status.get("workers", [])))
-    if not status.get("workers"):
+    if status and not status.get("workers"):
         st.warning(
-            "No sync worker is running, so schema changes and descriptions are not "
-            "picked up. Check that the worker service is running."
+            "The background worker is not running, so new tables and schema "
+            "changes are not picked up."
         )
 
-    actions = st.columns(3)
-    if actions[0].button("Check for schema changes", width="stretch"):
-        call(lambda: client().sync_source(source["id"]), "Check queued")
-    if actions[1].button("Refresh AI descriptions", width="stretch"):
-        call(lambda: client().describe_source(source["id"]), "Descriptions queued")
-    if actions[2].button("Re-describe everything", width="stretch"):
-        call(lambda: client().describe_source(source["id"], force=True), "Queued")
-
-    changes = status.get("recent_changes") or []
-    if changes:
-        st.markdown("**Recent schema changes**")
-        st.dataframe(
-            pd.DataFrame(
-                [
-                    {
-                        "When": _time(c["detected_at"]),
-                        "Table": f"{c['schema_name']}.{c['table_name']}",
-                        "Change": c["change"],
-                        "Details": ", ".join(
-                            f"{k}: {v}" for k, v in c["details"].items()
-                        ),
-                    }
-                    for c in changes
-                ]
-            ),
-            width="stretch",
-            hide_index=True,
+    sync, remove, _ = st.columns([1, 1, 2])
+    if sync.button("Sync now", width="stretch"):
+        call(lambda: client().sync_source(source["id"]), "Sync started")
+    with remove.popover("Delete", width="stretch"):
+        st.write(
+            f"Delete **{source['name']}** and everything Datalyst learned about it?"
         )
-    failed = [j for j in status.get("recent_jobs", []) if j["status"] == "failed"]
-    if failed:
-        with st.expander(f"{len(failed)} failed job(s)"):
-            for job in failed:
-                st.caption(f"{job['kind']} {job['target']}: {job['error']}")
-
-    with st.expander("Settings"):
-        with st.form(f"settings-{source['id']}"):
-            policy = st.radio(
-                "What may be sent to the LLM to describe tables",
-                list(POLICIES),
-                index=list(POLICIES).index(source["llm_data_policy"]),
-                format_func=POLICIES.get,
-            )
-            interval = st.number_input(
-                "Check for schema changes every (seconds)",
-                min_value=60,
-                value=source["sync_interval_seconds"],
-                step=60,
-            )
-            url = st.text_input(
-                "New connection URL (leave empty to keep the current one)",
-                type="password",
-            )
-            if st.form_submit_button("Save settings"):
-                fields = {
-                    "llm_data_policy": policy,
-                    "sync_interval_seconds": int(interval),
-                }
-                if url:
-                    fields["url"] = url
-                call(
-                    lambda: client().update_source(source["id"], **fields),
-                    "Settings saved",
-                )
-                st.rerun()
-        confirm = st.text_input(f"Type {source['name']} to delete this source")
         if st.button(
-            "Delete source", type="primary", disabled=confirm != source["name"]
-        ):
-            call(lambda: client().delete_source(source["id"]), "Source deleted")
+            "Delete source", type="primary", key=f"delete-{source['id']}"
+        ) and succeeded(lambda: client().delete_source(source["id"]), "Deleted"):
             st.rerun()
 
+    _access(source)
 
-def _add_form() -> None:
-    with st.expander("Add a data source", expanded=False), st.form("add-source"):
+    with st.expander("Connection and privacy"), st.form(f"edit-{source['id']}"):
+        policy = st.radio(
+            "What may be sent to the AI model to describe tables",
+            list(POLICIES),
+            index=list(POLICIES).index(source["llm_data_policy"]),
+            format_func=POLICIES.get,
+        )
+        url = st.text_input(
+            "New connection URL (leave empty to keep the current one)",
+            type="password",
+        )
+        if st.form_submit_button("Save"):
+            fields = {"llm_data_policy": policy}
+            if url:
+                fields["url"] = url.strip()
+            if call(lambda: client().update_source(source["id"], **fields), "Saved"):
+                st.rerun()
+
+
+def _access(source: dict) -> None:
+    access = call(lambda: client().source_access(source["id"]))
+    users = [u for u in call(client().users) or [] if u["role"] != "admin"]
+    if access is None:
+        return
+    st.subheader("Who can use it")
+    with st.form(f"access-{source['id']}"):
+        everyone = st.radio(
+            "Access",
+            [True, False],
+            index=0 if access["open_to_all"] else 1,
+            format_func=lambda open_: "All users" if open_ else "Only selected users",
+            horizontal=True,
+            label_visibility="collapsed",
+        )
+        by_label = {f"{u['name'] or u['email']} ({u['email']})": u["id"] for u in users}
+        chosen = st.multiselect(
+            "Selected users",
+            list(by_label),
+            default=[k for k, v in by_label.items() if v in access["user_ids"]],
+            help="Used only when access is limited. Admins can always use every source.",
+        )
+        if st.form_submit_button("Save access"):
+            saved = call(
+                lambda: client().set_source_access(
+                    source["id"], everyone, [by_label[k] for k in chosen]
+                ),
+                "Access saved",
+            )
+            if saved:
+                st.rerun()
+
+
+def _add_source() -> None:
+    with st.expander("Add a data source"), st.form("add-source"):
         st.caption(
-            "Use a database user that can only read. Datalyst also blocks writes itself, "
-            "but a read-only user is the strongest guarantee."
+            "Use a database login that can only read. Datalyst blocks writes too, "
+            "but a read-only login is the strongest guarantee."
         )
         name = st.text_input("Name", placeholder="sales")
         url = st.text_input(
@@ -141,23 +138,17 @@ def _add_form() -> None:
             type="password",
             placeholder="postgresql://readonly_user:password@host:5432/database",
         )
-        schemas = st.text_input("Schemas to include (comma separated, empty for all)")
         policy = st.radio(
-            "What may be sent to the LLM to describe tables",
+            "What may be sent to the AI model to describe tables",
             list(POLICIES),
             format_func=POLICIES.get,
         )
-        if st.form_submit_button("Test connection and add") and name and url:
+        if st.form_submit_button("Test and add", type="primary") and name and url:
             created = call(
                 lambda: client().create_source(
-                    name=name.strip(),
-                    url=url.strip(),
-                    include_schemas=[
-                        s.strip() for s in schemas.split(",") if s.strip()
-                    ],
-                    llm_data_policy=policy,
+                    name=name.strip(), url=url.strip(), llm_data_policy=policy
                 ),
-                "Source added; the worker will read its schema shortly",
+                "Source added; its tables appear within a minute",
             )
             if created:
                 st.rerun()

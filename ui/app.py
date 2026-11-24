@@ -2,6 +2,10 @@ import sys
 from pathlib import Path
 
 import streamlit as st
+from streamlit import runtime
+
+if not runtime.exists():
+    sys.exit("Start the web UI with: streamlit run ui/app.py")
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -18,7 +22,7 @@ from ui.session import (
     signed_in,
     sync_cookie,
 )
-from ui.views import ask, catalog, history, knowledge, people, settings, sources
+from ui.views import ask, history, settings, sources, users
 
 st.set_page_config(page_title="Datalyst", page_icon="📊", layout="wide")
 restore_session()
@@ -46,10 +50,7 @@ def setup_page() -> None:
     _, middle, _ = st.columns([1, 1.2, 1])
     with middle:
         st.title("Welcome to Datalyst")
-        st.caption(
-            "Create the first admin account. You will then choose the AI model and "
-            "connect your databases, all from this web interface."
-        )
+        st.caption("Create the admin account. Everything else is set up from here.")
         with st.form("setup"):
             name = st.text_input("Your name")
             email = st.text_input("Email")
@@ -71,76 +72,59 @@ def setup_page() -> None:
                     st.rerun()
 
 
-def account_page() -> None:
-    st.title("Account")
+def account_menu() -> None:
     user = current_user()
-    st.markdown(
-        f"**{user.get('name') or user.get('email')}** · {user.get('email')} · {user.get('role')}"
-    )
-    with st.form("password", clear_on_submit=True):
-        current = st.text_input("Current password", type="password")
-        new = st.text_input("New password (10+ characters)", type="password")
-        again = st.text_input("New password again", type="password")
-        if st.form_submit_button("Change password"):
-            if new != again:
-                st.error("The new passwords do not match.")
-            else:
-                try:
-                    client().change_password(current, new)
-                except ApiError as e:
-                    st.error(e.message)
+    with st.sidebar:
+        st.caption(f"{user.get('name') or user.get('email')} · {user.get('role')}")
+        with (
+            st.popover("Change password", width="stretch"),
+            st.form("password", clear_on_submit=True),
+        ):
+            current = st.text_input("Current password", type="password")
+            new = st.text_input("New password (10+ characters)", type="password")
+            again = st.text_input("New password again", type="password")
+            if st.form_submit_button("Change password"):
+                if new != again:
+                    st.error("The new passwords do not match.")
                 else:
-                    sign_out()
-                    st.success("Password changed. Sign in again with the new password.")
-                    st.rerun()
-    if st.button("Sign out"):
-        sign_out()
-        st.rerun()
+                    try:
+                        client().change_password(current, new)
+                    except ApiError as e:
+                        st.error(e.message)
+                    else:
+                        sign_out()
+                        st.rerun()
+        if st.button("Sign out", width="stretch"):
+            sign_out()
+            st.rerun()
 
 
 if not signed_in():
-    first_run = needs_setup()
     st.navigation(
         [
             st.Page(setup_page, title="Set up", icon="🚀")
-            if first_run
+            if needs_setup()
             else st.Page(login_page, title="Sign in", icon="🔑")
         ],
         position="hidden",
     ).run()
 else:
-    pages = {
-        "Analyse": [
-            st.Page(ask.render, title="Ask", icon="💬", default=True),
-            st.Page(history.render, title="History", icon="🕘", url_path="history"),
-        ],
-        "Knowledge": [
-            st.Page(catalog.render, title="Catalog", icon="📚", url_path="catalog"),
-            st.Page(
-                knowledge.render,
-                title="Glossary & examples",
-                icon="📖",
-                url_path="knowledge",
-            ),
-        ],
-    }
-    if is_admin():
-        pages["Administration"] = [
-            st.Page(sources.render, title="Data sources", icon="🗄️", url_path="sources"),
-            st.Page(
-                people.render, title="People & access", icon="👥", url_path="people"
-            ),
-            settings_page := st.Page(
-                settings.render, title="Settings", icon="⚙️", url_path="settings"
-            ),
-        ]
-    pages["You"] = [
-        st.Page(account_page, title="Account", icon="👤", url_path="account")
+    pages = [
+        st.Page(ask.render, title="Ask", icon="💬", default=True),
+        st.Page(history.render, title="History", icon="🕘", url_path="history"),
     ]
-    with st.sidebar:
-        user = current_user()
-        st.caption(f"Signed in as {user.get('email')}")
+    settings_page = None
+    if is_admin():
+        settings_page = st.Page(
+            settings.render, title="Settings", icon="⚙️", url_path="settings"
+        )
+        pages += [
+            st.Page(sources.render, title="Data sources", icon="🗄️", url_path="sources"),
+            st.Page(users.render, title="Users", icon="👥", url_path="users"),
+            settings_page,
+        ]
     navigation = st.navigation(pages)
-    if st.session_state.pop("go_to_settings", False) and is_admin():
+    account_menu()
+    if settings_page and st.session_state.pop("go_to_settings", False):
         st.switch_page(settings_page)
     navigation.run()
