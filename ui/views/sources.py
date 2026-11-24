@@ -8,7 +8,7 @@ POLICIES = {
     "stats": "Statistics and common values, no rows",
     "names": "Table and column names only, no data",
 }
-FILE_TYPES = ["csv", "tsv", "txt"]
+FILE_TYPES = ["csv", "tsv", "txt", "xlsx", "xlsm"]
 STATUS = {
     "ready": "🟢 Ready",
     "error": "🔴 Error",
@@ -105,8 +105,8 @@ def _files(source: dict) -> None:
     files = call(lambda: client().source_files(source["id"])) or []
     st.subheader("Files")
     st.caption(
-        "Each file is a table named after the file. Uploading a file with the "
-        "same name replaces that table."
+        "Each CSV file, and each sheet of an Excel workbook with several sheets, "
+        "is a table. Uploading a file with the same name replaces that table."
     )
     if files:
         st.dataframe(
@@ -189,11 +189,11 @@ def _add_source() -> None:
 def _upload_source() -> None:
     with st.form("upload-source"):
         st.caption(
-            "Upload a CSV file to ask questions about it. You can add more files "
-            "to the source afterwards."
+            "Upload a CSV or Excel file to ask questions about it. You can add "
+            "more files to the source afterwards."
         )
         name = st.text_input("Name", placeholder="sales-2024", key="upload-name")
-        file = st.file_uploader("CSV file", type=FILE_TYPES)
+        file = st.file_uploader("CSV or Excel file", type=FILE_TYPES)
         policy = st.radio(
             "What may be sent to the AI model to describe tables",
             list(POLICIES),

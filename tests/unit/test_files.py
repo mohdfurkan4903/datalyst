@@ -149,7 +149,8 @@ def test_messy_files_still_import_as_text(tmp_path, store):
     [
         ("id,name\n", "empty.csv", "no data rows"),
         ("", "blank.csv", "no data rows"),
-        ("a,b\n1,2\n", "sheet.xlsx", "Cannot read"),
+        ("a,b\n1,2\n", "notes.pdf", "Cannot read"),
+        ("a,b\n1,2\n", "old.xls", "old Excel format"),
         ("a,b\n1,2\n", "noext", "Cannot read"),
     ],
 )

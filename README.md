@@ -14,7 +14,7 @@ Bring your own model: OpenAI, Anthropic, Google Gemini, Groq, Ollama, LM Studio,
 - **Simple access control**: admins manage everything; each database is open to all users or only to the users an admin picks.
 - **Scales out**: stateless API and worker processes share one Postgres metastore.
 
-Supported data sources: PostgreSQL, MySQL 8, and uploaded CSV files. More are on the [roadmap](#roadmap).
+Supported data sources: PostgreSQL, MySQL 8, and uploaded CSV and Excel files. More are on the [roadmap](#roadmap).
 
 ## Install
 
@@ -125,7 +125,9 @@ The `datalyst` command starts the services and covers the few tasks an operator 
 
 ## Uploaded files
 
-Admins can upload CSV files (`.csv`, `.tsv`, `.txt`) on the Data sources page. Each file becomes a table named after the file, so several files in one source can be joined. Datalyst reads the types once (numbers, dates, text), cleans the column names, keeps the data as Parquet in the folder set by `files.dir` and answers questions with DuckDB. Uploading a file with the same name replaces that table.
+Admins can upload CSV files (`.csv`, `.tsv`, `.txt`) and Excel workbooks (`.xlsx`, `.xlsm`) on the Data sources page. Each CSV file becomes a table named after the file, so several files in one source can be joined. A workbook with one sheet is named after the file; a workbook with several sheets gives one table per sheet, named after the sheet (hidden and empty sheets are skipped). Datalyst reads the types once (numbers, dates, text, yes/no), cleans the column names, keeps the data as Parquet in the folder set by `files.dir` and answers questions with DuckDB. Uploading a file with the same name replaces that table.
+
+For Excel, title lines above the table are skipped, error cells such as `#DIV/0!` become empty, and a formula is read as the value Excel last saved with it (a workbook written by a program that never calculated its formulas has empty cells there). Old `.xls` files must be saved as `.xlsx` first.
 
 Questions can read only the uploaded tables: DuckDB is locked to the source's own folder, with file, network and extension access switched off, and queries that call file functions are refused before they run. The API and every worker must see the same folder (the deployment compose file shares one volume between them).
 
@@ -225,7 +227,7 @@ src/datalyst/
 ├── connectors/    data source implementations and the connector registry
 │   ├── postgres/  connection pool, introspection, profiling queries, query validator
 │   ├── mysql/     connections, introspection, profiling queries, query validator
-│   └── files/     uploaded CSV files: import to Parquet, DuckDB queries, locked-down validator
+│   └── files/     uploaded CSV and Excel files: import to Parquet, DuckDB queries, locked-down validator
 ├── metastore/     Postgres metastore: migrations and repositories
 ├── sync/          background worker, job handlers, incremental sync
 ├── enrichment/    profiling, relationship inference, AI descriptions, embeddings
@@ -254,7 +256,7 @@ New data sources plug in by implementing the `DataSource` interface and register
 - Observability: OpenTelemetry tracing of every question, LLM call and query
 - Conversation memory and follow-up questions
 - Single sign-on (OIDC)
-- More data sources: Excel upload, Parquet, MongoDB, Cassandra and others
+- More data sources: Parquet, MongoDB, Cassandra and others
 - MCP server
 
 ## Contributing

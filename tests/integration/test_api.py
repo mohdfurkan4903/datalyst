@@ -1,5 +1,8 @@
+import io
+
 import pytest
 from fastapi.testclient import TestClient
+from openpyxl import Workbook
 
 from datalyst.agent import AnalystAgent
 from datalyst.api import build_services, create_app
@@ -311,6 +314,49 @@ def test_uploaded_csv_files_become_a_source_people_can_ask(
         json={"sql": "SELECT * FROM read_csv('/etc/passwd')"},
     )
     assert blocked.status_code == 400
+
+
+def workbook_bytes():
+    workbook = Workbook()
+    customers = workbook.active
+    customers.title = "Customers"
+    customers.append(["Customer ID", "Name"])
+    customers.append([1, "Ann"])
+    customers.append([2, "Bob"])
+    orders = workbook.create_sheet("Orders")
+    orders.append(["Order ID", "Customer ID", "Total"])
+    for row in ((10, 1, 10.5), (11, 1, 7.25), (12, 2, 20)):
+        orders.append(row)
+    buffer = io.BytesIO()
+    workbook.save(buffer)
+    return buffer.getvalue()
+
+
+def test_an_uploaded_excel_workbook_gives_one_table_per_sheet(
+    api, admin, analyst, replies
+):
+    created = upload(api, admin, "workbook", "shop.xlsx", workbook_bytes())
+    assert created.status_code == 201, created.text
+    source = created.json()["id"]
+
+    replies(
+        sql_reply(
+            "SELECT c.name, SUM(o.total) AS spent FROM main.customers c "
+            "JOIN main.orders o ON o.customer_id = c.customer_id GROUP BY 1 ORDER BY 1"
+        )
+    )
+    answer = api.post(
+        f"/api/sources/{source}/ask",
+        headers=analyst,
+        json={"question": "Spend per customer?"},
+    ).json()
+
+    assert answer["result"]["rows"] == [["Ann", 17.75], ["Bob", 20.0]]
+    tables = [
+        f["table"]
+        for f in api.get(f"/api/sources/{source}/files", headers=admin).json()
+    ]
+    assert tables == ["customers", "orders"]
 
 
 def test_files_can_be_added_replaced_and_removed(api, admin, analyst, files_dir):

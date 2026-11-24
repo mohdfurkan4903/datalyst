@@ -286,7 +286,7 @@ OPTIONS: tuple[Option, ...] = (
     Option(
         "files",
         "dir",
-        "Folder where uploaded CSV files are kept. The API and every worker must see the same folder.",
+        "Folder where uploaded files are kept. The API and every worker must see the same folder.",
     ),
     Option("files", "max_upload_mb", "Largest file that can be uploaded."),
     Option("auth", "token_minutes", "How long a sign-in lasts."),

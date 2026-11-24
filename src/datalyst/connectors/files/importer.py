@@ -16,6 +16,7 @@ from datalyst.connectors.files.profiling import quote
 from datalyst.core.exceptions import ConfigurationError, brief
 
 CSV_SUFFIXES = frozenset({".csv", ".tsv", ".txt"})
+EXCEL_SUFFIXES = frozenset({".xlsx", ".xlsm"})
 MAX_NAME_LENGTH = 63
 
 # Tried in turn: let DuckDB pick the types, then keep everything as text, then
@@ -37,7 +38,7 @@ class ImportedTable:
 
 
 def supported_suffixes() -> frozenset[str]:
-    return CSV_SUFFIXES
+    return CSV_SUFFIXES | EXCEL_SUFFIXES
 
 
 def table_name(text: str) -> str:
@@ -71,43 +72,74 @@ def import_file(source: Path, filename: str, directory: Path) -> list[ImportedTa
     suffix = Path(filename).suffix.lower()
     if suffix in CSV_SUFFIXES:
         return [import_csv(source, table_name(filename), filename, directory)]
-    raise ConfigurationError(
-        f"Cannot read '{filename}'. Upload a CSV file ({', '.join(sorted(CSV_SUFFIXES))})."
-    )
+    if suffix in EXCEL_SUFFIXES:
+        from datalyst.connectors.files.excel import import_workbook
+
+        return import_workbook(source, filename, directory)
+    if suffix == ".xls":
+        raise ConfigurationError(
+            f"'{filename}' is an old Excel format. Save it as .xlsx and upload that."
+        )
+    allowed = ", ".join(sorted(supported_suffixes()))
+    raise ConfigurationError(f"Cannot read '{filename}'. Upload one of: {allowed}.")
 
 
 def import_csv(
     source: Path, table: str, filename: str, directory: Path
 ) -> ImportedTable:
-    directory.mkdir(parents=True, exist_ok=True)
-    pending = directory / f".{table}{TABLE_FILE_SUFFIX}.tmp"
     db = duckdb.connect(":memory:")
     problem: duckdb.Error | None = None
     try:
         for options in CSV_ATTEMPTS:
-            relation = f"read_csv('{_literal(source)}'{options})"
+            relation = f"read_csv('{literal(source)}'{options})"
             try:
                 described = db.execute(f"DESCRIBE SELECT * FROM {relation}").fetchall()
-                original = [row[0] for row in described]
-                names = column_names(original)
-                select = ", ".join(
-                    f"{quote(old)} AS {quote(new)}"
-                    for old, new in zip(original, names, strict=True)
-                )
-                db.execute(
-                    f"COPY (SELECT {select} FROM {relation}) TO '{_literal(pending)}' "
-                    "(FORMAT parquet, COMPRESSION zstd)"
-                )
-                break
             except duckdb.Error as e:
                 problem = e
-                pending.unlink(missing_ok=True)
-        else:
-            raise ConfigurationError(
-                f"Could not read '{filename}' as a CSV file: {brief(problem or '')}"
+                continue
+            original = [row[0] for row in described]
+            names = column_names(original)
+            select = ", ".join(
+                f"{quote(old)} AS {quote(new)}"
+                for old, new in zip(original, names, strict=True)
             )
+            try:
+                return publish(
+                    db,
+                    f"SELECT {select} FROM {relation}",
+                    table,
+                    names,
+                    filename,
+                    directory,
+                )
+            except duckdb.Error as e:
+                problem = e
+        raise ConfigurationError(
+            f"Could not read '{filename}' as a CSV file: {brief(problem or '')}"
+        )
+    finally:
+        db.close()
+
+
+def publish(
+    db: duckdb.DuckDBPyConnection,
+    select: str,
+    table: str,
+    columns: list[str],
+    filename: str,
+    directory: Path,
+) -> ImportedTable:
+    """Write a query's rows as the table's Parquet file, replacing any earlier one
+    in a single step so readers never see a half-written file."""
+    directory.mkdir(parents=True, exist_ok=True)
+    pending = directory / f".{table}{TABLE_FILE_SUFFIX}.tmp"
+    try:
+        db.execute(
+            f"COPY ({select}) TO '{literal(pending)}' "
+            "(FORMAT parquet, COMPRESSION zstd)"
+        )
         rows = db.execute(
-            f"SELECT COUNT(*) FROM read_parquet('{_literal(pending)}')"
+            f"SELECT COUNT(*) FROM read_parquet('{literal(pending)}')"
         ).fetchone()[0]
         if rows == 0:
             raise ConfigurationError(f"'{filename}' has no data rows.")
@@ -115,10 +147,9 @@ def import_csv(
         replaced = final.exists()
         os.replace(pending, final)
     finally:
-        db.close()
         pending.unlink(missing_ok=True)
-    return ImportedTable(name=table, rows=rows, columns=names, replaced=replaced)
+    return ImportedTable(name=table, rows=rows, columns=columns, replaced=replaced)
 
 
-def _literal(path: Path) -> str:
+def literal(path: Path | str) -> str:
     return str(path).replace("'", "''")
