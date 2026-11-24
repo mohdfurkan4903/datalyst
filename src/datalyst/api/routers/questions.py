@@ -18,7 +18,9 @@ router = APIRouter(tags=["questions"])
 def ask(
     source_id: int, body: AskRequest, user: CurrentUser, app: Services
 ) -> AnalysisResult:
-    return app.questions.ask(user, source_id, body.question.strip())
+    return app.questions.ask(
+        user, source_id, body.question.strip(), body.conversation_id
+    )
 
 
 @router.post("/api/sources/{source_id}/query")

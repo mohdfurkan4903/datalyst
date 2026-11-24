@@ -7,10 +7,12 @@ from datalyst.metastore.migrator import migrate, pending_migrations
 from datalyst.metastore.pool import create_pool
 from datalyst.metastore.repositories import (
     CatalogRepository,
+    ConversationRepository,
     EmbeddingRepository,
     HistoryRepository,
     JobRepository,
     KnowledgeRepository,
+    MemoryRepository,
     SettingsRepository,
     SourceRepository,
     UsageRepository,
@@ -29,6 +31,8 @@ class Metastore:
         self.knowledge = KnowledgeRepository(pool)
         self.users = UserRepository(pool)
         self.history = HistoryRepository(pool)
+        self.conversations = ConversationRepository(pool)
+        self.memories = MemoryRepository(pool)
         self.settings = SettingsRepository(pool)
 
     @classmethod

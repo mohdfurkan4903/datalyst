@@ -37,6 +37,8 @@ def show_result(result: dict | None, key: str) -> None:
 
 
 def show_answer(answer: dict, key: str) -> None:
+    for note in answer.get("memory_notes", []):
+        st.caption(f"🧠 {note}")
     if answer.get("rewritten_question"):
         st.caption(f"Interpreted as: {answer['rewritten_question']}")
     if answer.get("error"):

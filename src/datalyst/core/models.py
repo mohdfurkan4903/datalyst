@@ -202,6 +202,8 @@ class AnalysisResult(BaseModel):
     rewritten_question: str | None = None
     trace_id: str | None = None
     duration_ms: float = 0.0
+    conversation_id: int | None = None
+    memory_notes: list[str] = Field(default_factory=list)
 
     @property
     def success(self) -> bool:
@@ -376,4 +378,40 @@ class HistoryEntry(BaseModel):
     duration_ms: int | None = None
     feedback: int | None = None
     feedback_note: str | None = None
+    conversation_id: int | None = None
     created_at: datetime | None = None
+
+
+class Turn(BaseModel):
+    """An earlier exchange in a chat, as the agent sees it."""
+
+    question: str
+    query: str | None = None
+    row_count: int | None = None
+    preview: str | None = None
+    declined: str | None = None
+
+
+class Conversation(BaseModel):
+    id: int
+    user_id: int
+    source_id: int
+    title: str
+    turns: int = 0
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+class MemoryOrigin(StrEnum):
+    USER = "user"
+    AGENT = "agent"
+
+
+class Memory(BaseModel):
+    id: int
+    user_id: int
+    source_id: int | None = None
+    text: str
+    origin: MemoryOrigin
+    created_at: datetime | None = None
+    updated_at: datetime | None = None

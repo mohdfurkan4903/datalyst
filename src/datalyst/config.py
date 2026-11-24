@@ -100,6 +100,11 @@ class Settings(BaseModel):
     sync_poll_interval_seconds: float = Field(default=2.0, gt=0)
     sync_lease_seconds: int = Field(default=900, ge=60)
 
+    memory_enabled: bool = True
+    memory_learn: bool = True
+    memory_turns: int = Field(default=6, ge=0, le=20)
+    memory_max_items: int = Field(default=50, ge=1, le=500)
+
     files_dir: str = "data/files"
     files_max_upload_mb: int = Field(default=200, ge=1)
 
@@ -187,6 +192,7 @@ SECTIONS: dict[str, str] = {
     "retrieval": "Choosing the tables a question needs",
     "query": "Running queries on data sources",
     "sync": "Background worker",
+    "memory": "Chat and long-term memory",
     "files": "Uploaded files",
     "auth": "Sign-in",
 }
@@ -283,6 +289,22 @@ OPTIONS: tuple[Option, ...] = (
         "lease_seconds",
         "A job held longer than this by a stopped worker is retried.",
     ),
+    Option(
+        "memory",
+        "enabled",
+        "Remember earlier questions in a chat and what each user asked to be remembered.",
+    ),
+    Option(
+        "memory",
+        "learn",
+        'Let the assistant save definitions and preferences users state in a chat (for example "remember that revenue means paid orders").',
+    ),
+    Option(
+        "memory",
+        "turns",
+        "Earlier questions of a chat the assistant sees when answering a follow-up.",
+    ),
+    Option("memory", "max_items", "Most long-term memories kept per user."),
     Option(
         "files",
         "dir",

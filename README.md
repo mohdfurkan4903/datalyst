@@ -8,6 +8,7 @@ Bring your own model: OpenAI, Anthropic, Google Gemini, Groq, Ollama, LM Studio,
 
 - **Web app for the whole team**: ask questions, see charts, keep history, rate answers.
 - **Set up in the browser**: the first visit creates the admin; the AI model, API keys, databases and users are all configured in the UI.
+- **Remembers**: follow-up questions build on the chat, chats can be reopened days later, and each user's definitions and preferences are remembered across chats (see [Memory](#memory)).
 - **Understands messy databases**: profiles columns, infers joins that were never declared, and writes descriptions with the LLM, so cryptic legacy schemas work without manual documentation.
 - **Stays in sync**: a background worker notices schema changes within minutes and re-reads only what changed.
 - **Read-only by design**, enforced in three independent layers (see [Safety](#safety)).
@@ -98,6 +99,7 @@ Everyone sees:
 
 - **Ask:** chat with a data source; each answer shows the result table, an automatic chart (line for time series, bar for categories, a single number as a metric), the SQL, and 👍/👎 feedback. Results download as CSV. Admins can save a good answer as a verified example that similar questions reuse.
 - **History:** past questions with their status and SQL.
+- **Memory:** what Datalyst remembers about you; add or forget items.
 
 Admins also see:
 
@@ -122,6 +124,16 @@ The `datalyst` command starts the services and covers the few tasks an operator 
 | `datalyst migrate` | Creates or upgrades the metastore tables. |
 | `datalyst config list / get-value / options` | Shows the effective configuration. |
 | `datalyst reset-password <email>` | Sets a password when nobody can sign in. |
+
+## Memory
+
+Datalyst has two kinds of memory, both private to each user.
+
+**Chat memory.** Every question belongs to a chat. When you ask a follow-up ("and only the paid ones?", "same but by month"), the assistant sees the earlier questions of the chat with the queries it ran, so it builds on them. On the Ask page the chat picker lists your earlier chats; open one days later and carry on, or delete it. The assistant sees the last six questions of a chat (`memory.turns`). It also sees the first rows of earlier results, but only for sources whose data policy allows rows to be sent to the model; for the other policies it sees the query and the row count only.
+
+**Long-term memory.** Definitions and preferences are kept across every chat. Say it in a chat ("remember that revenue means paid orders", "from now on show amounts in EUR", "forget the EUR thing") or add it on the Memory page. A memory can apply to every data source or to one, and is shown to the assistant on every later question. Only messages that sound like a lasting statement are sent to the model for a closer look, so ordinary questions cost nothing extra; memories that look like secrets (passwords, keys, card numbers) are never saved. Each user keeps up to 50 memories (`memory.max_items`); when full, the oldest one the assistant learned itself is replaced, and anything the user added is never dropped without them.
+
+Admins can switch memory off (`memory.enabled`) or stop the assistant from saving things on its own (`memory.learn`) on the Settings page, under Advanced. Removing a user removes their chats and memories.
 
 ## Uploaded files
 
@@ -254,7 +266,6 @@ New data sources plug in by implementing the `DataSource` interface and register
 
 - Evaluations: a golden dataset of questions with reference queries, scored on execution accuracy and safety
 - Observability: OpenTelemetry tracing of every question, LLM call and query
-- Conversation memory and follow-up questions
 - Single sign-on (OIDC)
 - More data sources: Parquet, MongoDB, Cassandra and others
 - MCP server

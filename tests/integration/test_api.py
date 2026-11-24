@@ -44,6 +44,7 @@ def config(metastore, files_dir):
     environ = {
         "DATALYST__FILES__DIR": str(files_dir),
         "DATALYST__FILES__MAX_UPLOAD_MB": "1",
+        "DATALYST__MEMORY__MAX_ITEMS": "3",
     }
     return ConfigService(metastore, environ=environ, refresh_seconds=0)
 
@@ -415,6 +416,292 @@ def test_bad_uploads_are_refused_and_leave_nothing_behind(api, admin, shop, file
     assert api.get(f"/api/sources/{shop}/files", headers=admin).status_code == 400
 
 
+COUNT_ORDERS = "SELECT count(*) AS n FROM public.orders"
+
+
+def ask(api, headers, source, question, conversation_id=None):
+    body = {"question": question}
+    if conversation_id:
+        body["conversation_id"] = conversation_id
+    response = api.post(f"/api/sources/{source}/ask", headers=headers, json=body)
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
+def test_follow_up_questions_see_the_earlier_part_of_the_chat(
+    api, admin, analyst, shop, replies
+):
+    replies(
+        sql_reply(COUNT_ORDERS),
+        sql_reply("SELECT count(*) AS n FROM public.orders WHERE status = 'paid'"),
+    )
+
+    first = ask(api, analyst, shop, "How many orders are there?")
+    second = ask(
+        api, analyst, shop, "and only the paid ones?", first["conversation_id"]
+    )
+
+    assert first["conversation_id"] == second["conversation_id"]
+    assert "Conversation so far (oldest first)" not in replies.llm.prompts[0]
+    follow_up = replies.llm.prompts[1]
+    assert "Conversation so far (oldest first)" in follow_up
+    assert "Question: How many orders are there?" in follow_up
+    assert f"Query: {COUNT_ORDERS}" in follow_up
+    assert "1 row(s), for example" in follow_up and "[[2000]]" in follow_up
+
+    chats = api.get("/api/conversations", headers=analyst).json()
+    assert [(c["id"], c["title"], c["turns"]) for c in chats] == [
+        (first["conversation_id"], "How many orders are there?", 2)
+    ]
+    opened = api.get(f"/api/conversations/{first['conversation_id']}", headers=analyst)
+    assert [e["question"] for e in opened.json()["entries"]] == [
+        "How many orders are there?",
+        "and only the paid ones?",
+    ]
+    # Chats are private to their owner.
+    assert api.get("/api/conversations", headers=admin).json() == []
+    other = api.get(f"/api/conversations/{first['conversation_id']}", headers=admin)
+    assert other.status_code == 404
+    stolen = api.post(
+        f"/api/sources/{shop}/ask",
+        headers=admin,
+        json={"question": "hi", "conversation_id": first["conversation_id"]},
+    )
+    assert stolen.status_code == 404
+
+    gone = api.delete(f"/api/conversations/{first['conversation_id']}", headers=analyst)
+    assert gone.status_code == 204
+    assert api.get("/api/conversations", headers=analyst).json() == []
+    # The audit trail of what was asked stays.
+    assert len(api.get("/api/history", headers=analyst).json()) == 2
+
+
+def test_rows_are_only_shown_to_the_model_when_the_source_allows_it(
+    api, admin, analyst, shop, replies
+):
+    api.patch(f"/api/sources/{shop}", headers=admin, json={"llm_data_policy": "stats"})
+    replies(sql_reply(COUNT_ORDERS), sql_reply(COUNT_ORDERS))
+
+    first = ask(api, analyst, shop, "How many orders are there?")
+    ask(api, analyst, shop, "again please", first["conversation_id"])
+
+    follow_up = replies.llm.prompts[1]
+    assert f"Query: {COUNT_ORDERS}" in follow_up
+    assert "Result: 1 row(s)" in follow_up and "for example" not in follow_up
+    assert "[[2000]]" not in follow_up
+
+
+def test_a_chat_belongs_to_one_source(api, admin, analyst, shop, replies):
+    replies(sql_reply(COUNT_ORDERS))
+    chat = ask(api, analyst, shop, "How many orders?")["conversation_id"]
+    other = api.post(
+        "/api/sources",
+        headers=admin,
+        json={"name": "second", "url": api.database_url},
+    ).json()["id"]
+
+    response = api.post(
+        f"/api/sources/{other}/ask",
+        headers=analyst,
+        json={"question": "hi", "conversation_id": chat},
+    )
+
+    assert response.status_code == 404
+    assert (
+        api.get(f"/api/conversations?source_id={other}", headers=analyst).json() == []
+    )
+
+
+def test_the_assistant_learns_what_the_user_asks_it_to_remember(
+    api, admin, analyst, shop, replies
+):
+    replies(
+        "REMEMBER (source): Revenue means the total of paid orders.\nNO_QUESTION",
+        sql_reply(COUNT_ORDERS),
+    )
+
+    told = ask(api, analyst, shop, "Remember that revenue means paid orders")
+
+    assert told["memory_notes"] == [
+        "Remembered: Revenue means the total of paid orders."
+    ]
+    assert told["query"] is None and told["result"] is None and told["error"] is None
+    assert told["conversation_id"]
+    memories = api.get("/api/memories", headers=analyst).json()
+    assert [(m["text"], m["origin"], m["source_id"]) for m in memories] == [
+        ("Revenue means the total of paid orders.", "agent", shop)
+    ]
+    # Nothing was run, so nothing is in the history.
+    assert api.get("/api/history", headers=analyst).json() == []
+
+    # A later chat, with no memory of the first, still knows it.
+    ask(api, analyst, shop, "What was revenue last month?")
+    assert len(replies.llm.prompts) == 2
+    prompt = replies.llm.prompts[1]
+    assert "About this user (saved" in prompt
+    assert "- Revenue means the total of paid orders." in prompt
+    assert api.get("/api/memories", headers=admin).json() == []
+
+
+def test_a_message_can_teach_and_ask_at_once_and_memories_can_be_forgotten(
+    api, analyst, shop, replies
+):
+    replies(
+        "REMEMBER (all): Show amounts in EUR.",
+        sql_reply(COUNT_ORDERS),
+    )
+
+    answer = ask(
+        api, analyst, shop, "From now on show amounts in EUR. How many orders?"
+    )
+
+    assert answer["memory_notes"] == ["Remembered: Show amounts in EUR."]
+    assert answer["result"]["rows"] == [[2000]]
+    assert "Show amounts in EUR." in replies.llm.prompts[1]
+    memory = api.get("/api/memories", headers=analyst).json()[0]
+    assert memory["source_id"] is None
+
+    replies(f"FORGET: {memory['id']}\nNO_QUESTION")
+    forgotten = ask(api, analyst, shop, "Forget the thing about EUR")
+    assert forgotten["memory_notes"] == ["Forgot: Show amounts in EUR."]
+    assert api.get("/api/memories", headers=analyst).json() == []
+
+
+def test_a_failing_model_never_blocks_a_question(api, analyst, shop, replies):
+    replies(sql_reply(COUNT_ORDERS))
+    original = replies.llm.invoke
+    calls = []
+
+    def flaky(messages):
+        calls.append(1)
+        if len(calls) == 1:
+            raise RuntimeError("model down")
+        return original(messages)
+
+    replies.llm.invoke = flaky
+
+    answer = ask(
+        api, analyst, shop, "Remember that I like short answers. How many orders?"
+    )
+
+    assert answer["memory_notes"] == []
+    assert answer["result"]["rows"] == [[2000]]
+
+
+def test_people_manage_their_own_memories(api, admin, analyst, shop):
+    added = api.post(
+        "/api/memories",
+        headers=analyst,
+        json={"text": "  Fiscal year starts in   April ", "source_id": None},
+    )
+    assert added.status_code == 201, added.text
+    assert added.json()["origin"] == "user"
+    assert added.json()["text"] == "Fiscal year starts in April"
+    scoped = api.post(
+        "/api/memories",
+        headers=analyst,
+        json={"text": "Ignore test customers", "source_id": shop},
+    ).json()
+    again = api.post(
+        "/api/memories", headers=analyst, json={"text": "fiscal year starts in april"}
+    ).json()
+    assert again["id"] == added.json()["id"]
+    assert len(api.get("/api/memories", headers=analyst).json()) == 2
+    for_the_source = api.get(f"/api/memories?source_id={shop}", headers=analyst).json()
+    assert sorted(m["text"] for m in for_the_source) == [
+        "Fiscal year starts in April",
+        "Ignore test customers",
+    ]
+
+    edited = api.put(
+        f"/api/memories/{scoped['id']}",
+        headers=analyst,
+        json={"text": "Ignore demo accounts"},
+    )
+    assert edited.json()["text"] == "Ignore demo accounts"
+    # Nobody else can see, change or delete them.
+    assert api.get("/api/memories", headers=admin).json() == []
+    assert (
+        api.put(
+            f"/api/memories/{scoped['id']}", headers=admin, json={"text": "x"}
+        ).status_code
+        == 404
+    )
+    assert api.delete(f"/api/memories/{scoped['id']}", headers=admin).status_code == 404
+
+    assert (
+        api.delete(f"/api/memories/{scoped['id']}", headers=analyst).status_code == 204
+    )
+    assert api.delete("/api/memories", headers=analyst).status_code == 204
+    assert api.get("/api/memories", headers=analyst).json() == []
+
+
+def test_memory_has_a_limit_and_makes_room_by_forgetting_what_it_learned(
+    api, analyst, shop, replies
+):
+    for text in ("one", "two", "three"):
+        assert (
+            api.post("/api/memories", headers=analyst, json={"text": text}).status_code
+            == 201
+        )
+    full = api.post("/api/memories", headers=analyst, json={"text": "four"})
+    assert full.status_code == 400 and "full" in full.json()["error"]["message"]
+
+    replies("REMEMBER (all): Learned fact\nNO_QUESTION")
+    told = ask(api, analyst, shop, "Remember my team is sales")
+    assert told["memory_notes"] == [
+        "Memory is full. Remove something on the Memory page to save more."
+    ]
+
+    api.delete("/api/memories", headers=analyst)
+    api.post("/api/memories", headers=analyst, json={"text": "kept"})
+    replies(
+        "REMEMBER (all): first learned\nNO_QUESTION",
+        "REMEMBER (all): second learned\nNO_QUESTION",
+        "REMEMBER (all): third learned\nNO_QUESTION",
+    )
+    for message in ("Remember a", "Remember b", "Remember c"):
+        ask(api, analyst, shop, message)
+    assert sorted(
+        m["text"] for m in api.get("/api/memories", headers=analyst).json()
+    ) == [
+        "kept",
+        "second learned",
+        "third learned",
+    ]
+
+
+def test_memory_can_be_switched_off(api, admin, analyst, shop, replies):
+    api.put("/api/settings", headers=admin, json={"values": {"memory.enabled": False}})
+    replies(sql_reply(COUNT_ORDERS), sql_reply(COUNT_ORDERS))
+    api.post("/api/memories", headers=analyst, json={"text": "A saved fact"})
+
+    first = ask(api, analyst, shop, "Remember that this is ignored. How many orders?")
+    ask(api, analyst, shop, "again", first["conversation_id"])
+
+    assert first["conversation_id"] is None and first["memory_notes"] == []
+    assert len(replies.llm.prompts) == 2
+    assert all(
+        "About this user (saved" not in p
+        and "Conversation so far (oldest first)" not in p
+        for p in replies.llm.prompts
+    )
+
+
+def test_removing_a_user_removes_their_chats_and_memories(
+    api, admin, analyst, shop, replies, metastore
+):
+    replies(sql_reply(COUNT_ORDERS))
+    ask(api, analyst, shop, "How many orders?")
+    api.post("/api/memories", headers=analyst, json={"text": "A fact"})
+    uid = user_id(api, admin)
+
+    api.delete(f"/api/users/{uid}", headers=admin)
+
+    assert metastore.memories.list(uid) == []
+    assert metastore.conversations.list(uid) == []
+
+
 def test_history_feedback_and_promotion(api, admin, analyst, shop, replies):
     replies(sql_reply("SELECT count(*) AS orders FROM public.orders"))
     answer = api.post(
@@ -598,6 +885,12 @@ def test_users_cannot_change_anything_admins_manage(api, analyst, shop):
         ("POST", "/api/sources/{source_id}/ask"),
         ("POST", "/api/sources/{source_id}/query"),
         ("POST", "/api/history/{entry_id}/feedback"),
+        # A user's own chats and memories.
+        ("DELETE", "/api/conversations/{conversation_id}"),
+        ("POST", "/api/memories"),
+        ("PUT", "/api/memories/{memory_id}"),
+        ("DELETE", "/api/memories/{memory_id}"),
+        ("DELETE", "/api/memories"),
     }
     checked = 0
     for route_path, operations in api.app.openapi()["paths"].items():
@@ -611,6 +904,8 @@ def test_users_cannot_change_anything_admins_manage(api, analyst, shop):
                 "entry_id": 1,
                 "example_id": 1,
                 "relationship_id": 1,
+                "conversation_id": 1,
+                "memory_id": 1,
                 "term": "x",
                 "table": "public.orders",
                 "column": "id",

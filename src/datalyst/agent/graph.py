@@ -1,11 +1,19 @@
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 
+from datalyst.agent.memory import (
+    EXTRACT_PROMPT,
+    MemoryUpdate,
+    parse_memory_update,
+    render_conversation,
+    render_extract_input,
+    render_memories,
+)
 from datalyst.agent.parsing import (
     extract_query,
     extract_refusal,
@@ -29,7 +37,7 @@ from datalyst.catalog import Candidates, SchemaRetriever
 from datalyst.catalog.sqlrefs import catalog_problems, referenced_tables, resolve_tables
 from datalyst.core.exceptions import LLMError, QueryExecutionError, UnsafeQueryError
 from datalyst.core.interfaces import DataSource
-from datalyst.core.models import DataSchema
+from datalyst.core.models import DataSchema, Memory, Turn
 
 REWRITE, RETRIEVE, SELECT, GENERATE, VALIDATE, EXECUTE, HEAL = (
     "rewrite",
@@ -66,9 +74,32 @@ class AnalystAgent:
         self._healer = healer
         self._graph = self._build_graph()
 
-    def run(self, question: str, catalog: DataSchema) -> AgentState:
+    def run(
+        self,
+        question: str,
+        catalog: DataSchema,
+        turns: Sequence[Turn] = (),
+        memories: Sequence[str] = (),
+    ) -> AgentState:
         return self._graph.invoke(
-            {"question": question, "catalog": catalog, "attempts": 0, "healed": False}
+            {
+                "question": question,
+                "conversation": render_conversation(turns),
+                "memories": render_memories(memories),
+                "catalog": catalog,
+                "attempts": 0,
+                "healed": False,
+            }
+        )
+
+    def extract_memory(self, question: str, existing: Sequence[Memory]) -> MemoryUpdate:
+        """What this message asks to remember or forget, if anything."""
+        messages = [
+            SystemMessage(EXTRACT_PROMPT),
+            HumanMessage(render_extract_input(question, existing)),
+        ]
+        return parse_memory_update(
+            message_text(self._invoke(messages)), [m.id for m in existing]
         )
 
     def _build_graph(self) -> CompiledStateGraph:
@@ -103,9 +134,12 @@ class AnalystAgent:
         return graph.compile()
 
     def _rewrite(self, state: AgentState) -> AgentState:
+        asked = state["question"]
+        if state.get("conversation"):
+            asked = f"{state['conversation']}\n\nQuestion: {asked}"
         messages = [
             SystemMessage(render_rewrite_prompt(self._datasource.dialect)),
-            HumanMessage(state["question"]),
+            HumanMessage(asked),
         ]
         rewrite = parse_rewrite(message_text(self._invoke(messages)))
         return {"rewritten_question": rewrite.question, "search_terms": rewrite.terms}
@@ -130,12 +164,13 @@ class AnalystAgent:
 
     def _select(self, state: AgentState) -> AgentState:
         candidates = state["candidates"]
+        asked = state.get("rewritten_question") or state["question"]
         listing = render_candidates(
             state["catalog"], candidates.tables, candidates.value_hints
         )
         messages = [
             SystemMessage(render_select_prompt(self._datasource.dialect)),
-            HumanMessage(f"Candidates:\n{listing}\n\nQuestion: {state['question']}"),
+            HumanMessage(f"Candidates:\n{listing}\n\nQuestion: {asked}"),
         ]
         chosen = parse_selection(
             message_text(self._invoke(messages)), candidates.tables
@@ -286,9 +321,13 @@ class AnalystAgent:
             default_schema=self._datasource.default_schema,
             text_date_function=self._datasource.text_date_function,
         )
+        extra = "\n\n".join(
+            part for part in (state.get("memories"), state.get("conversation")) if part
+        )
+        context = state.get("context", "")
+        if extra:
+            context = f"{context}\n{extra}\n"
         user = USER_PROMPT.format(
-            schema=state["schema"],
-            context=state.get("context", ""),
-            question=state["question"],
+            schema=state["schema"], context=context, question=state["question"]
         )
         return [SystemMessage(system), HumanMessage(user)]

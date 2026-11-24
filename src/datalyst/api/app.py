@@ -16,6 +16,7 @@ from datalyst.api.routers import (
     files,
     health,
     knowledge,
+    memory,
     questions,
     settings,
     sources,
@@ -42,7 +43,7 @@ def build_services(
         config=config,
         auth=build_auth(metastore, config),
         registry=registry,
-        questions=QuestionService(metastore, registry),
+        questions=QuestionService(metastore, registry, config),
         boot=boot,
     )
 
@@ -95,6 +96,7 @@ def create_app(services: AppServices | None = None) -> FastAPI:
         sources,
         catalog,
         knowledge,
+        memory,
         questions,
         admin,
         settings,

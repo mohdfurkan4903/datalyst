@@ -112,10 +112,37 @@ class DatalystClient:
             json={"open_to_all": open_to_all, "user_ids": user_ids},
         )
 
-    def ask(self, source_id: int, question: str) -> dict:
+    def ask(
+        self, source_id: int, question: str, conversation_id: int | None = None
+    ) -> dict:
         return self._call(
-            "POST", f"/api/sources/{source_id}/ask", json={"question": question}
+            "POST",
+            f"/api/sources/{source_id}/ask",
+            json={"question": question, "conversation_id": conversation_id},
         )
+
+    def conversations(self, source_id: int) -> list[dict]:
+        return self._call("GET", "/api/conversations", params={"source_id": source_id})
+
+    def conversation(self, conversation_id: int) -> dict:
+        return self._call("GET", f"/api/conversations/{conversation_id}")
+
+    def delete_conversation(self, conversation_id: int) -> None:
+        self._call("DELETE", f"/api/conversations/{conversation_id}")
+
+    def memories(self) -> list[dict]:
+        return self._call("GET", "/api/memories")
+
+    def add_memory(self, text: str, source_id: int | None = None) -> dict:
+        return self._call(
+            "POST", "/api/memories", json={"text": text, "source_id": source_id}
+        )
+
+    def delete_memory(self, memory_id: int) -> None:
+        self._call("DELETE", f"/api/memories/{memory_id}")
+
+    def clear_memories(self) -> None:
+        self._call("DELETE", "/api/memories")
 
     def run_sql(self, source_id: int, sql: str) -> dict:
         return self._call("POST", f"/api/sources/{source_id}/query", json={"sql": sql})

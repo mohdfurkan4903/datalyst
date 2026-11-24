@@ -31,6 +31,11 @@ Rules:
 - Columns marked "cents" hold money in cents: divide by 100.0 for currency amounts.
 - Follow the definitions under "Business terms" when the question uses those terms.
 - "Verified examples" are trusted queries for this database: reuse their patterns.
+- "Conversation so far" lists the earlier questions of this chat with their queries. \
+When the question is a follow-up ("and for Germany?", "same but by month", "who are \
+they?"), build on the earlier query instead of starting over.
+- "About this user" lists definitions and preferences the user saved earlier. Follow \
+them unless the question says otherwise.
 - For row listings without an explicit size, add LIMIT {default_limit}.
 - If the question asks to change data, reply exactly: {refusal} read-only access only
 - If the schema cannot answer the question, reply exactly: {refusal} <short reason>
@@ -65,7 +70,9 @@ You prepare questions for a {dialect} database that has many tables. \
 Do not write a query.
 
 1. Rewrite the question as one clear, standalone analytics question. \
-Keep its meaning; do not add filters or assumptions.
+Keep its meaning; do not add filters or assumptions. If it refers to the earlier \
+conversation ("it", "those", "same", "and for 2023"), use the conversation to \
+say what it refers to.
 2. List search terms that help find the relevant tables: the entities, metrics, \
 filters and values in the question, likely table and column names, and common \
 synonyms (for example revenue: sales, amount, price; client: customer, account).

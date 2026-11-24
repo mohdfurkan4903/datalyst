@@ -15,6 +15,8 @@ class ErrorKind(StrEnum):
 
 class AgentState(TypedDict, total=False):
     question: str
+    conversation: str
+    memories: str
     catalog: DataSchema
     rewritten_question: str | None
     search_terms: list[str]

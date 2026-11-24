@@ -1,11 +1,12 @@
 from psycopg_pool import ConnectionPool
 
 from datalyst.core.exceptions import NotFoundError
-from datalyst.core.models import AnalysisResult, HistoryEntry
+from datalyst.core.models import AnalysisResult, HistoryEntry, Turn
 
 _COLUMNS = """
 id, user_id, source_id, question, rewritten_question, tables, sql, status, error,
-attempts, row_count, duration_ms, feedback, feedback_note, created_at
+attempts, row_count, duration_ms, feedback, feedback_note, conversation_id,
+created_at
 """
 
 
@@ -22,15 +23,21 @@ class HistoryRepository:
         self._pool = pool
 
     def record(
-        self, user_id: int | None, source_id: int, result: AnalysisResult
+        self,
+        user_id: int | None,
+        source_id: int,
+        result: AnalysisResult,
+        conversation_id: int | None = None,
+        preview: str | None = None,
     ) -> int:
         with self._pool.connection() as conn:
             row = conn.execute(
                 """
                 INSERT INTO query_history (
                     user_id, source_id, question, rewritten_question, tables, sql,
-                    status, error, attempts, row_count, duration_ms
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    status, error, attempts, row_count, duration_ms,
+                    conversation_id, result_preview
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING id
                 """,
                 (
@@ -45,6 +52,8 @@ class HistoryRepository:
                     result.attempts,
                     result.result.row_count if result.result else None,
                     round(result.duration_ms),
+                    conversation_id,
+                    preview,
                 ),
             ).fetchone()
         return row["id"]
@@ -82,6 +91,45 @@ class HistoryRepository:
                 },
             ).fetchall()
         return [HistoryEntry(**row) for row in rows]
+
+    def conversation(self, conversation_id: int) -> "list[HistoryEntry]":
+        """Every exchange of a chat, oldest first."""
+        with self._pool.connection() as conn:
+            rows = conn.execute(
+                f"SELECT {_COLUMNS} FROM query_history "
+                "WHERE conversation_id = %s ORDER BY id",
+                (conversation_id,),
+            ).fetchall()
+        return [HistoryEntry(**row) for row in rows]
+
+    def turns(self, conversation_id: int, limit: int) -> "list[Turn]":
+        """The latest exchanges of a chat that the agent can build on, oldest first."""
+        if limit <= 0:
+            return []
+        with self._pool.connection() as conn:
+            rows = conn.execute(
+                """
+                SELECT question, sql, status, error, row_count, result_preview
+                FROM (
+                    SELECT id, question, sql, status, error, row_count, result_preview
+                    FROM query_history
+                    WHERE conversation_id = %s AND status IN ('success', 'declined')
+                    ORDER BY id DESC LIMIT %s
+                ) AS latest
+                ORDER BY id
+                """,
+                (conversation_id, limit),
+            ).fetchall()
+        return [
+            Turn(
+                question=row["question"],
+                query=row["sql"],
+                row_count=row["row_count"],
+                preview=row["result_preview"],
+                declined=row["error"] if row["status"] == "declined" else None,
+            )
+            for row in rows
+        ]
 
     def set_feedback(self, entry_id: int, value: int | None, note: str | None) -> None:
         with self._pool.connection() as conn:

@@ -22,7 +22,7 @@ from ui.session import (
     signed_in,
     sync_cookie,
 )
-from ui.views import ask, history, settings, sources, users
+from ui.views import ask, history, memory, settings, sources, users
 
 st.set_page_config(page_title="Datalyst", page_icon="📊", layout="wide")
 restore_session()
@@ -112,6 +112,7 @@ else:
     pages = [
         st.Page(ask.render, title="Ask", icon="💬", default=True),
         st.Page(history.render, title="History", icon="🕘", url_path="history"),
+        st.Page(memory.render, title="Memory", icon="🧠", url_path="memory"),
     ]
     settings_page = None
     if is_admin():

@@ -67,6 +67,16 @@ class ExampleCreate(BaseModel):
 
 class AskRequest(BaseModel):
     question: str = Field(min_length=1, max_length=2000)
+    conversation_id: int | None = None
+
+
+class MemoryCreate(BaseModel):
+    text: str = Field(min_length=1, max_length=300)
+    source_id: int | None = None
+
+
+class MemoryUpdate(BaseModel):
+    text: str = Field(min_length=1, max_length=300)
 
 
 class QueryRequest(BaseModel):
