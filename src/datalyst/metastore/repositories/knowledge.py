@@ -92,7 +92,9 @@ class KnowledgeRepository:
                     ),
                 ).fetchone()
         except psycopg.errors.CheckViolation as e:
-            raise ConfigurationError(f"Invalid example: {e}") from e
+            raise ConfigurationError(
+                "Invalid example: status must be approved, pending or rejected."
+            ) from e
         return VerifiedQuery(**row)
 
     def examples(

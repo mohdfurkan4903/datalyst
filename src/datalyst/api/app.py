@@ -72,6 +72,7 @@ def create_app(services: AppServices | None = None) -> FastAPI:
     @app.middleware("http")
     async def request_log(request: Request, call_next):
         request_id = request.headers.get("x-request-id") or uuid.uuid4().hex[:12]
+        request.state.request_id = request_id[:64]
         started = time.perf_counter()
         response = await call_next(request)
         response.headers["x-request-id"] = request_id

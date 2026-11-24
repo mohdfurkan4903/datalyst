@@ -8,7 +8,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import timedelta
 
-from datalyst.core.exceptions import NotFoundError
+from datalyst.core.exceptions import DatalystError, NotFoundError, brief
 from datalyst.core.models import Job, JobStatus, SourceStatus
 from datalyst.metastore import Metastore
 from datalyst.sync.handlers import (
@@ -134,7 +134,11 @@ class SyncWorker:
         logger.info("Worker %s picked up new settings", self.worker_id)
 
     def _handle_failure(self, job: Job, error: Exception) -> None:
-        message = f"{type(error).__name__}: {error}"
+        message = (
+            brief(error)
+            if isinstance(error, DatalystError)
+            else "Unexpected error; the worker log has the details."
+        )
         status = self.metastore.jobs.fail(job, message)
         log = logger.error if status == JobStatus.FAILED else logger.warning
         log(

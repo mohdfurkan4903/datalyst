@@ -1,3 +1,5 @@
+import logging
+
 import psycopg
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
@@ -8,6 +10,7 @@ from datalyst.api.deps import Services
 from datalyst.core.exceptions import MetastoreError
 
 router = APIRouter(tags=["health"])
+logger = logging.getLogger(__name__)
 
 
 @router.get("/health")
@@ -19,10 +22,9 @@ def health() -> dict:
 def ready(app: Services) -> JSONResponse:
     try:
         pending = app.metastore.pending_migrations()
-    except (psycopg.Error, PoolTimeout, MetastoreError) as e:
-        return JSONResponse(
-            status_code=503, content={"status": "unavailable", "detail": str(e)}
-        )
+    except (psycopg.Error, PoolTimeout, MetastoreError):
+        logger.warning("Metastore is not reachable", exc_info=True)
+        return JSONResponse(status_code=503, content={"status": "unavailable"})
     if pending:
         return JSONResponse(
             status_code=503,

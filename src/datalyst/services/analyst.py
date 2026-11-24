@@ -3,7 +3,7 @@ import time
 from datalyst.agent import AnalystAgent
 from datalyst.catalog import SchemaCatalog
 from datalyst.catalog.sqlrefs import catalog_problems
-from datalyst.core.exceptions import UnsafeQueryError
+from datalyst.core.exceptions import UnsafeQueryError, brief
 from datalyst.core.interfaces import DataSource
 from datalyst.core.models import AnalysisResult, DataSchema, QueryResult
 
@@ -26,7 +26,7 @@ class AnalystService:
             question=question,
             query=state.get("query"),
             result=state.get("result"),
-            error=state.get("error"),
+            error=brief(state["error"]) if state.get("error") else None,
             attempts=state.get("attempts", 0),
             tables=state.get("tables", []),
             rewritten_question=state.get("rewritten_question"),

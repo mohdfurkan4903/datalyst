@@ -17,7 +17,9 @@ ENV PATH="/app/.venv/bin:$PATH" \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     STREAMLIT_BROWSER_GATHER_USAGE_STATS=false \
-    STREAMLIT_SERVER_HEADLESS=true
+    STREAMLIT_SERVER_HEADLESS=true \
+    STREAMLIT_CLIENT_SHOW_ERROR_DETAILS=none \
+    STREAMLIT_CLIENT_TOOLBAR_MODE=viewer
 RUN groupadd --system datalyst && useradd --system --gid datalyst --home /app datalyst
 WORKDIR /app
 COPY --from=build --chown=datalyst:datalyst /app/.venv /app/.venv

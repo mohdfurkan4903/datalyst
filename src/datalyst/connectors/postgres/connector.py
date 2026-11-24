@@ -69,6 +69,8 @@ class PostgresDataSource(DataSource):
         pool_max_size: int = 5,
         connect_timeout_seconds: float = 10,
     ) -> None:
+        self._url = url
+        self._connect_timeout = connect_timeout_seconds
         self._timeout_ms = int(timeout_seconds * 1000)
         self._max_rows = max_rows
         self._include_schemas = set(include_schemas or [])
@@ -85,6 +87,18 @@ class PostgresDataSource(DataSource):
 
     def validate(self, query: str) -> str:
         return self._validator.validate(query)
+
+    def check(self) -> None:
+        # A direct connection reports why it failed (wrong password, unknown
+        # database); the pool only reports that it timed out.
+        try:
+            with psycopg.connect(
+                self._url, connect_timeout=max(1, int(self._connect_timeout))
+            ) as conn:
+                conn.read_only = True
+                conn.execute("SELECT 1")
+        except psycopg.Error as e:
+            raise QueryExecutionError(_connection_problem(e)) from e
 
     def execute(self, query: str) -> QueryResult:
         start = time.perf_counter()
@@ -235,6 +249,19 @@ class PostgresDataSource(DataSource):
                 (str(self._timeout_ms),),
             )
             yield cur
+
+
+def _connection_problem(error: psycopg.Error) -> str:
+    text = " ".join(str(error).split())
+    text = text.split(" Multiple connection attempts failed")[0]
+    if "FATAL:" in text:
+        reason = text.rsplit("FATAL:", 1)[-1]
+    elif " failed: " in text:
+        reason = text.split(" failed: ", 1)[-1]
+    else:
+        reason = text
+    reason = reason.strip()
+    return reason[:1].upper() + reason[1:] if reason else "Connection failed."
 
 
 def _make_read_only(conn: psycopg.Connection) -> None:

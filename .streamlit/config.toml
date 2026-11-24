@@ -1,0 +1,11 @@
+# Web UI settings. Errors are logged on the server and never shown in the
+# browser with their details.
+[client]
+showErrorDetails = "none"
+toolbarMode = "viewer"
+
+[browser]
+gatherUsageStats = false
+
+[server]
+headless = true

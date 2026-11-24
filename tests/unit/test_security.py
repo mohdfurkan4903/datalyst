@@ -5,7 +5,7 @@ from decimal import Decimal
 import jwt
 import pytest
 
-from datalyst.api.errors import status_for
+from datalyst.api.errors import public_message, status_for
 from datalyst.core.exceptions import (
     AuthenticationError,
     ConfigurationError,
@@ -16,6 +16,7 @@ from datalyst.core.exceptions import (
     QueryExecutionError,
     UnsafeQueryError,
     UnsupportedDataSourceError,
+    brief,
 )
 from datalyst.core.models import (
     Column,
@@ -140,3 +141,19 @@ def test_query_results_serialize_to_plain_json():
     assert result.model_dump(mode="json")["rows"] == [[1.25]]
     assert result.rows == [[Decimal("1.25")]]
 
+
+def test_brief_keeps_one_short_line():
+    message = 'column "x" does not exist\nLINE 1: SELECT x FROM t\n       ^'
+
+    assert brief(message) == 'column "x" does not exist'
+    assert brief("a" * 400).endswith("…")
+    assert len(brief("a" * 400)) == 300
+
+
+def test_server_errors_get_a_fixed_message():
+    assert public_message(NotFoundError("Data source 3 does not exist.")) == (
+        "Data source 3 does not exist."
+    )
+    hidden = public_message(LLMError("401 {'error': 'key sk-live-123 is invalid'}"))
+    assert "sk-live" not in hidden
+    assert "sk-live" not in public_message(RuntimeError("sk-live-123"))

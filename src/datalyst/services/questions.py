@@ -18,8 +18,12 @@ class QuestionService:
         analyst = self._registry.get(source)
         try:
             result = analyst.ask(question)
-        except LLMError as e:
-            failed = AnalysisResult(question=question, error=str(e), source=source.name)
+        except LLMError:
+            failed = AnalysisResult(
+                question=question,
+                error="The AI model could not answer this question.",
+                source=source.name,
+            )
             failed.id = self._metastore.history.record(
                 principal.user.id, source_id, failed
             )

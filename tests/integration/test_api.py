@@ -138,7 +138,8 @@ def test_source_creation_tests_the_connection(api, admin):
             "url": "postgresql://nobody:x@localhost:1/none?connect_timeout=1",
         },
     )
-    assert response.status_code == 422
+    assert response.status_code == 400
+    assert response.json()["error"]["message"].startswith("Could not connect")
     unsupported = api.post(
         "/api/sources", headers=admin, json={"name": "m", "url": "mongodb://h/db"}
     )
@@ -426,6 +427,22 @@ def test_users_cannot_change_anything_admins_manage(api, analyst, shop):
             assert response.status_code == 403, (method, route_path, response.text)
             checked += 1
     assert checked >= 15
+
+
+def test_server_errors_do_not_reveal_details(api, admin, monkeypatch):
+    def broken(*args, **kwargs):
+        raise RuntimeError("password=hunter2 at /srv/secret.py line 3")
+
+    monkeypatch.setattr(api.app.state.services.metastore.users, "all", broken)
+    quiet = TestClient(api.app, raise_server_exceptions=False)
+    response = quiet.get("/api/users", headers=admin)
+
+    assert response.status_code == 500
+    error = response.json()["error"]
+    assert error["type"] == "InternalError"
+    assert "hunter2" not in response.text and "secret.py" not in response.text
+    assert error["message"].startswith("Something went wrong")
+    assert error["reference"]
 
 
 def test_the_last_admin_is_protected(api, admin):

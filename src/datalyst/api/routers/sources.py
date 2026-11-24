@@ -3,6 +3,7 @@ from fastapi import APIRouter
 from datalyst.api.deps import Admin, CurrentUser, Services
 from datalyst.api.schemas import SourceAccess, SourceCreate, SourceUpdate
 from datalyst.connectors import create_datasource, datasource_kind
+from datalyst.core.exceptions import ConfigurationError, QueryExecutionError, brief
 from datalyst.core.models import DataSourceInfo
 from datalyst.sync import check_source_request, describe_source_request
 
@@ -101,5 +102,12 @@ def source_status(source_id: int, _: Admin, app: Services) -> dict:
 
 
 def _test_connection(app, url: str, include_schemas: list[str]) -> None:
-    with create_datasource(url, app.config.current(), include_schemas) as datasource:
-        datasource.execute("SELECT 1")
+    try:
+        with create_datasource(
+            url, app.config.current(), include_schemas
+        ) as datasource:
+            datasource.check()
+    except QueryExecutionError as e:
+        raise ConfigurationError(
+            f"Could not connect to the database: {brief(e)}"
+        ) from e

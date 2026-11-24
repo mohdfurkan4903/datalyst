@@ -32,6 +32,10 @@ class DataSource(ABC):
     @abstractmethod
     def execute(self, query: str) -> QueryResult: ...
 
+    def check(self) -> None:
+        """Fail with a clear reason when the database cannot be reached."""
+        self.execute("SELECT 1")
+
     def close(self) -> None:
         pass
 

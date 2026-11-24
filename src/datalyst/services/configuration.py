@@ -19,7 +19,7 @@ from datalyst.config import (
     plain_value,
     resolve,
 )
-from datalyst.core.exceptions import ConfigurationError, DatalystError
+from datalyst.core.exceptions import ConfigurationError, DatalystError, brief
 from datalyst.metastore import Metastore
 
 logger = logging.getLogger(__name__)
@@ -195,9 +195,10 @@ def check_connection(settings: Settings, target: str) -> dict[str, Any]:
         else:
             raise ConfigurationError("Test 'llm', 'describe' or 'embeddings'.")
     except DatalystError as e:
-        return {"ok": False, "detail": str(e)}
-    except Exception as e:  # noqa: BLE001 - provider SDKs raise their own types
-        return {"ok": False, "detail": f"{type(e).__name__}: {e}"[:500]}
+        return {"ok": False, "detail": brief(e)}
+    except Exception as e:
+        logger.warning("Connection test for %s failed", target, exc_info=True)
+        return {"ok": False, "detail": f"The provider refused the call: {brief(e)}"}
     return {
         "ok": True,
         "detail": detail,

@@ -36,3 +36,15 @@ class AuthenticationError(DatalystError):
 
 class PermissionDeniedError(DatalystError):
     pass
+
+
+def brief(error: BaseException | str, limit: int = 300) -> str:
+    """A short, single-line message that is safe to show to people.
+
+    Drivers and SDKs often put several lines, request dumps or pointers into
+    their messages; people need only the first meaningful line.
+    """
+    text = str(error)
+    line = next((part.strip() for part in text.splitlines() if part.strip()), "")
+    line = " ".join(line.split())
+    return line if len(line) <= limit else line[: limit - 1].rstrip() + "…"

@@ -49,7 +49,10 @@ class SourceRepository:
         except psycopg.errors.UniqueViolation as e:
             raise ConfigurationError(f"A data source named '{name}' exists.") from e
         except psycopg.errors.CheckViolation as e:
-            raise ConfigurationError(f"Invalid data source settings: {e}") from e
+            raise ConfigurationError(
+                "Invalid data source name: use lowercase letters, digits, '-' and "
+                "'_' (up to 63 characters), starting with a letter or digit."
+            ) from e
         return DataSourceInfo(**row)
 
     def all(self) -> list[DataSourceInfo]:
