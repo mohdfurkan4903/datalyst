@@ -1,6 +1,7 @@
 from fastapi import APIRouter
 
 from datalyst.api.deps import Admin, CurrentUser, Services
+from datalyst.api.routers.files import delete_files
 from datalyst.api.schemas import SourceAccess, SourceCreate, SourceUpdate
 from datalyst.connectors import create_datasource, datasource_kind
 from datalyst.core.exceptions import ConfigurationError, QueryExecutionError, brief
@@ -54,6 +55,7 @@ def update_source(
 @router.delete("/{source_id}", status_code=204)
 def delete_source(source_id: int, _: Admin, app: Services) -> None:
     app.registry.forget(source_id)
+    delete_files(app, source_id)
     app.metastore.sources.delete(source_id)
 
 

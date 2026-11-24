@@ -36,7 +36,19 @@ TEXT_TYPES = (
     "char",
     "bpchar",
 )
-INTEGER_TYPES = ("smallint", "integer", "bigint", "int", "tinyint", "mediumint")
+INTEGER_TYPES = (
+    "smallint",
+    "integer",
+    "bigint",
+    "int",
+    "tinyint",
+    "mediumint",
+    "hugeint",
+    "ubigint",
+    "uinteger",
+    "usmallint",
+    "utinyint",
+)
 DECIMAL_TYPES = ("numeric", "decimal", "real", "double", "float", "money")
 TYPE_MODIFIERS = ("unsigned", "zerofill")
 ENUM_TYPES = ("enum", "set")

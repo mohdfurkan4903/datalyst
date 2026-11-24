@@ -9,6 +9,7 @@ authors = [
 requires-python = ">=3.12"
 dependencies = [
     "argon2-cffi>=25.1.0",
+    "duckdb>=2.0.1",
     "email-validator>=2.4.0",
     "fastapi>=0.165.0",
     "langchain>=1.5.2",
@@ -20,6 +21,7 @@ dependencies = [
     "pydantic-settings>=2.16.3",
     "pyjwt>=2.15.1",
     "pymysql[rsa]>=1.2.4",
+    "python-multipart>=0.0.34",
     "sqlglot>=30.33.0",
     "typer>=0.29.2",
     "uvicorn[standard]>=0.54.0",

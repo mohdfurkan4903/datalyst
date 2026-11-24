@@ -8,6 +8,7 @@ POLICIES = {
     "stats": "Statistics and common values, no rows",
     "names": "Table and column names only, no data",
 }
+FILE_TYPES = ["csv", "tsv", "txt"]
 STATUS = {
     "ready": "🟢 Ready",
     "error": "🔴 Error",
@@ -35,6 +36,7 @@ def _table(sources: list[dict]) -> None:
             [
                 {
                     "Name": s["name"],
+                    "Type": "Uploaded files" if s["kind"] == "files" else "Database",
                     "Status": STATUS.get(s["status"], s["status"]),
                     "Who can use it": "All users"
                     if s["open_to_all"]
@@ -72,6 +74,8 @@ def _manage(source: dict) -> None:
         ) and succeeded(lambda: client().delete_source(source["id"]), "Deleted"):
             st.rerun()
 
+    if source["kind"] == "files":
+        _files(source)
     _access(source)
 
     with st.expander("Connection and privacy"), st.form(f"edit-{source['id']}"):
@@ -81,15 +85,62 @@ def _manage(source: dict) -> None:
             index=list(POLICIES).index(source["llm_data_policy"]),
             format_func=POLICIES.get,
         )
-        url = st.text_input(
-            "New connection URL (leave empty to keep the current one)",
-            type="password",
+        url = (
+            ""
+            if source["kind"] == "files"
+            else st.text_input(
+                "New connection URL (leave empty to keep the current one)",
+                type="password",
+            )
         )
         if st.form_submit_button("Save"):
             fields = {"llm_data_policy": policy}
             if url:
                 fields["url"] = url.strip()
             if call(lambda: client().update_source(source["id"], **fields), "Saved"):
+                st.rerun()
+
+
+def _files(source: dict) -> None:
+    files = call(lambda: client().source_files(source["id"])) or []
+    st.subheader("Files")
+    st.caption(
+        "Each file is a table named after the file. Uploading a file with the "
+        "same name replaces that table."
+    )
+    if files:
+        st.dataframe(
+            pd.DataFrame(
+                [
+                    {
+                        "Table": f["table"],
+                        "Size": f"{f['size_bytes'] / 1024:,.0f} KB",
+                        "Updated": _time(f["updated_at"]),
+                    }
+                    for f in files
+                ]
+            ),
+            width="stretch",
+            hide_index=True,
+        )
+        with st.popover("Remove a table"):
+            table = st.selectbox("Table", [f["table"] for f in files])
+            if st.button(
+                "Remove table", type="primary", key=f"remove-file-{source['id']}"
+            ) and succeeded(
+                lambda: client().delete_source_file(source["id"], table), "Removed"
+            ):
+                st.rerun()
+    with st.form(f"add-file-{source['id']}", clear_on_submit=True):
+        upload = st.file_uploader("Add a file", type=FILE_TYPES)
+        if st.form_submit_button("Upload") and upload is not None:
+            added = call(
+                lambda: client().add_source_file(
+                    source["id"], upload.name, upload.getvalue()
+                ),
+                "File added; it appears within a minute",
+            )
+            if added:
                 st.rerun()
 
 
@@ -127,7 +178,45 @@ def _access(source: dict) -> None:
 
 
 def _add_source() -> None:
-    with st.expander("Add a data source"), st.form("add-source"):
+    with st.expander("Add a data source"):
+        database, upload = st.tabs(["Database", "Upload a file"])
+        with database:
+            _add_database()
+        with upload:
+            _upload_source()
+
+
+def _upload_source() -> None:
+    with st.form("upload-source"):
+        st.caption(
+            "Upload a CSV file to ask questions about it. You can add more files "
+            "to the source afterwards."
+        )
+        name = st.text_input("Name", placeholder="sales-2024", key="upload-name")
+        file = st.file_uploader("CSV file", type=FILE_TYPES)
+        policy = st.radio(
+            "What may be sent to the AI model to describe tables",
+            list(POLICIES),
+            format_func=POLICIES.get,
+            key="upload-policy",
+        )
+        if (
+            st.form_submit_button("Upload and add", type="primary")
+            and name
+            and file is not None
+        ):
+            created = call(
+                lambda: client().upload_source(
+                    name.strip(), file.name, file.getvalue(), policy
+                ),
+                "Source added; its tables appear within a minute",
+            )
+            if created:
+                st.rerun()
+
+
+def _add_database() -> None:
+    with st.form("add-source"):
         st.caption(
             "Use a database login that can only read. Datalyst blocks writes too, "
             "but a read-only login is the strongest guarantee."

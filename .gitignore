@@ -16,3 +16,6 @@ wheels/
 deploy/.env
 .vscode/
 .idea/
+
+# Files uploaded as data sources
+data/

@@ -32,8 +32,17 @@ def replies():
 
 
 @pytest.fixture
-def config(metastore):
-    return ConfigService(metastore, environ={}, refresh_seconds=0)
+def files_dir(tmp_path):
+    return tmp_path / "files"
+
+
+@pytest.fixture
+def config(metastore, files_dir):
+    environ = {
+        "DATALYST__FILES__DIR": str(files_dir),
+        "DATALYST__FILES__MAX_UPLOAD_MB": "1",
+    }
+    return ConfigService(metastore, environ=environ, refresh_seconds=0)
 
 
 @pytest.fixture
@@ -253,6 +262,111 @@ def test_asking_a_mysql_source(api, admin, analyst, replies, mysql_shop):
         json={"sql": "SELECT SLEEP(5)"},
     )
     assert blocked.status_code == 400
+
+
+ORDERS_CSV = b"""Order ID,Customer,Total
+1,Ann,10.5
+2,Bob,20
+3,Ann,7.25
+"""
+
+
+def upload(api, headers, name, filename="orders.csv", content=ORDERS_CSV):
+    return api.post(
+        "/api/sources/upload",
+        headers=headers,
+        data={"name": name},
+        files={"file": (filename, content, "text/csv")},
+    )
+
+
+def test_uploaded_csv_files_become_a_source_people_can_ask(
+    api, admin, analyst, replies, files_dir
+):
+    created = upload(api, admin, "sales-files")
+    assert created.status_code == 201, created.text
+    source = created.json()["id"]
+    assert created.json()["kind"] == "files"
+    assert len(list(files_dir.iterdir())) == 1
+
+    replies(
+        sql_reply("SELECT * FROM main.orderz"),
+        sql_reply(
+            "SELECT customer, SUM(total) AS spent FROM main.orders GROUP BY 1 ORDER BY 1"
+        ),
+    )
+    answer = api.post(
+        f"/api/sources/{source}/ask",
+        headers=analyst,
+        json={"question": "Spend per customer?"},
+    ).json()
+
+    assert answer["attempts"] == 2
+    assert answer["result"]["rows"] == [["Ann", 17.75], ["Bob", 20.0]]
+    assert 'Table "main.orderz" does not exist' in replies.llm.prompts[1]
+    assert "DuckDB" in replies.llm.prompts[0]
+    blocked = api.post(
+        f"/api/sources/{source}/query",
+        headers=analyst,
+        json={"sql": "SELECT * FROM read_csv('/etc/passwd')"},
+    )
+    assert blocked.status_code == 400
+
+
+def test_files_can_be_added_replaced_and_removed(api, admin, analyst, files_dir):
+    source = upload(api, admin, "sales-files").json()["id"]
+
+    added = api.post(
+        f"/api/sources/{source}/files",
+        headers=admin,
+        files={"file": ("customers.csv", b"id,name\n1,Ann\n", "text/csv")},
+    )
+    assert added.status_code == 201, added.text
+    assert added.json()[0]["table"] == "customers"
+    again = api.post(
+        f"/api/sources/{source}/files",
+        headers=admin,
+        files={"file": ("customers.csv", b"id,name\n1,Ann\n2,Bob\n", "text/csv")},
+    )
+    assert again.json()[0]["replaced"] is True
+    listed = api.get(f"/api/sources/{source}/files", headers=admin).json()
+    assert [f["table"] for f in listed] == ["customers", "orders"]
+    assert api.get(f"/api/sources/{source}/files", headers=analyst).status_code == 403
+
+    assert (
+        api.delete(f"/api/sources/{source}/files/customers", headers=admin).status_code
+        == 204
+    )
+    assert (
+        api.delete(f"/api/sources/{source}/files/customers", headers=admin).status_code
+        == 404
+    )
+    assert [
+        f["table"]
+        for f in api.get(f"/api/sources/{source}/files", headers=admin).json()
+    ] == ["orders"]
+
+    assert api.delete(f"/api/sources/{source}", headers=admin).status_code == 204
+    assert list(files_dir.iterdir()) == []
+
+
+def test_bad_uploads_are_refused_and_leave_nothing_behind(api, admin, shop, files_dir):
+    too_big = b"a,b\n" + b"1,2\n" * 400_000
+    for filename, content, message in (
+        ("empty.csv", b"a,b\n", "no data rows"),
+        ("notes.pdf", b"%PDF", "Cannot read"),
+        ("big.csv", too_big, "larger than"),
+    ):
+        response = upload(api, admin, "bad-upload", filename, content)
+        assert response.status_code == 400, response.text
+        assert message in response.json()["error"]["message"]
+    assert upload(api, admin, "Not A Valid Name").status_code == 400
+    assert not files_dir.exists() or list(files_dir.iterdir()) == []
+    assert [s["name"] for s in api.get("/api/sources", headers=admin).json()] == [
+        "shop"
+    ]
+    # Only uploaded-file sources hold files.
+    assert api.get(f"/api/sources/{shop}/files", headers=admin).status_code == 400
 
 
 def test_history_feedback_and_promotion(api, admin, analyst, shop, replies):

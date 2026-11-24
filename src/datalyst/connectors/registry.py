@@ -68,3 +68,19 @@ def _create_mysql(
         include_schemas=include_schemas,
         pool_max_size=settings.query_pool_max_size,
     )
+
+
+@register_connector("files")
+def _create_files(
+    url: str, settings: Settings, include_schemas: list[str]
+) -> DataSource:
+    from pathlib import Path
+
+    from datalyst.connectors.files import FilesDataSource
+
+    return FilesDataSource(
+        url,
+        Path(settings.files_dir),
+        timeout_seconds=settings.query_timeout_seconds,
+        max_rows=settings.query_max_rows,
+    )

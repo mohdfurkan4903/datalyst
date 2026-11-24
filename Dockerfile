@@ -19,8 +19,10 @@ ENV PATH="/app/.venv/bin:$PATH" \
     STREAMLIT_BROWSER_GATHER_USAGE_STATS=false \
     STREAMLIT_SERVER_HEADLESS=true \
     STREAMLIT_CLIENT_SHOW_ERROR_DETAILS=none \
-    STREAMLIT_CLIENT_TOOLBAR_MODE=viewer
+    STREAMLIT_CLIENT_TOOLBAR_MODE=viewer \
+    DATALYST__FILES__DIR=/data/files
 RUN groupadd --system datalyst && useradd --system --gid datalyst --home /app datalyst
+RUN mkdir -p /data/files && chown -R datalyst:datalyst /data
 WORKDIR /app
 COPY --from=build --chown=datalyst:datalyst /app/.venv /app/.venv
 COPY --chown=datalyst:datalyst src ./src

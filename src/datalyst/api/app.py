@@ -13,6 +13,7 @@ from datalyst.api.routers import (
     admin,
     auth,
     catalog,
+    files,
     health,
     knowledge,
     questions,
@@ -90,6 +91,7 @@ def create_app(services: AppServices | None = None) -> FastAPI:
     for module in (
         health,
         auth,
+        files,
         sources,
         catalog,
         knowledge,

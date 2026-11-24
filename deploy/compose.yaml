@@ -46,12 +46,16 @@ services:
       DATALYST_METASTORE_URL: ${DATALYST_METASTORE_URL:-postgresql://datalyst:${METASTORE_PASSWORD}@metastore:5432/datalyst}
       HEALTH_PORT: "8000"
       HEALTH_PATH: /ready
+    volumes:
+      - files:/data/files
 
   worker:
     <<: *app
     command: ["worker"]
     healthcheck:
       disable: true
+    volumes:
+      - files:/data/files
     deploy:
       replicas: ${WORKER_REPLICAS:-1}
 
@@ -87,5 +91,6 @@ services:
 
 volumes:
   metastore-data:
+  files:
   caddy-data:
   caddy-config:

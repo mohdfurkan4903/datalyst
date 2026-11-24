@@ -63,6 +63,31 @@ class DatalystClient:
     def create_source(self, **fields: Any) -> dict:
         return self._call("POST", "/api/sources", json=fields)
 
+    def upload_source(
+        self, name: str, filename: str, content: bytes, llm_data_policy: str
+    ) -> dict:
+        return self._call(
+            "POST",
+            "/api/sources/upload",
+            data={"name": name, "llm_data_policy": llm_data_policy},
+            files={"file": (filename, content)},
+        )
+
+    def source_files(self, source_id: int) -> list[dict]:
+        return self._call("GET", f"/api/sources/{source_id}/files")
+
+    def add_source_file(
+        self, source_id: int, filename: str, content: bytes
+    ) -> list[dict]:
+        return self._call(
+            "POST",
+            f"/api/sources/{source_id}/files",
+            files={"file": (filename, content)},
+        )
+
+    def delete_source_file(self, source_id: int, table: str) -> None:
+        self._call("DELETE", f"/api/sources/{source_id}/files/{table}")
+
     def update_source(self, source_id: int, **fields: Any) -> dict:
         return self._call("PATCH", f"/api/sources/{source_id}", json=fields)
 

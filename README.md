@@ -14,7 +14,7 @@ Bring your own model: OpenAI, Anthropic, Google Gemini, Groq, Ollama, LM Studio,
 - **Simple access control**: admins manage everything; each database is open to all users or only to the users an admin picks.
 - **Scales out**: stateless API and worker processes share one Postgres metastore.
 
-Supported data sources: PostgreSQL and MySQL 8. More are on the [roadmap](#roadmap).
+Supported data sources: PostgreSQL, MySQL 8, and uploaded CSV files. More are on the [roadmap](#roadmap).
 
 ## Install
 
@@ -123,6 +123,12 @@ The `datalyst` command starts the services and covers the few tasks an operator 
 | `datalyst config list / get-value / options` | Shows the effective configuration. |
 | `datalyst reset-password <email>` | Sets a password when nobody can sign in. |
 
+## Uploaded files
+
+Admins can upload CSV files (`.csv`, `.tsv`, `.txt`) on the Data sources page. Each file becomes a table named after the file, so several files in one source can be joined. Datalyst reads the types once (numbers, dates, text), cleans the column names, keeps the data as Parquet in the folder set by `files.dir` and answers questions with DuckDB. Uploading a file with the same name replaces that table.
+
+Questions can read only the uploaded tables: DuckDB is locked to the source's own folder, with file, network and extension access switched off, and queries that call file functions are refused before they run. The API and every worker must see the same folder (the deployment compose file shares one volume between them).
+
 ## How it understands your data
 
 Datalyst is built for databases with hundreds or thousands of tables, including badly documented ones.
@@ -218,7 +224,8 @@ src/datalyst/
 ├── core/          models, interfaces and exceptions
 ├── connectors/    data source implementations and the connector registry
 │   ├── postgres/  connection pool, introspection, profiling queries, query validator
-│   └── mysql/     connections, introspection, profiling queries, query validator
+│   ├── mysql/     connections, introspection, profiling queries, query validator
+│   └── files/     uploaded CSV files: import to Parquet, DuckDB queries, locked-down validator
 ├── metastore/     Postgres metastore: migrations and repositories
 ├── sync/          background worker, job handlers, incremental sync
 ├── enrichment/    profiling, relationship inference, AI descriptions, embeddings
@@ -247,7 +254,7 @@ New data sources plug in by implementing the `DataSource` interface and register
 - Observability: OpenTelemetry tracing of every question, LLM call and query
 - Conversation memory and follow-up questions
 - Single sign-on (OIDC)
-- More data sources: CSV and Excel upload, Parquet, MongoDB, Cassandra and others
+- More data sources: Excel upload, Parquet, MongoDB, Cassandra and others
 - MCP server
 
 ## Contributing

@@ -142,6 +142,10 @@ GRANT SELECT ON sales.* TO 'datalyst_ro'@'%';
 
 Connect with `mysql://datalyst_ro:<password>@host:3306/sales`. The database in the URL is the one questions are answered from; leave it out to read every database the login can see, and add `?ssl=true` for TLS. Datalyst starts every MySQL session read-only with a query time limit. MySQL keeps no column statistics, so profiling uses a bounded sample of each table; run `ANALYZE TABLE` now and then so row counts are close.
 
+### Uploaded files
+
+CSV files uploaded in the UI are stored as Parquet in the folder set by `files.dir` (`/data/files` in the image, on the `files` volume). The API and every worker must see the same folder: with the provided compose file this works on one host; across hosts, mount shared storage (for example NFS or EFS) at the same path on each. Include the `files` volume in your backups. The size limit is `files.max_upload_mb` (200 MB by default, change it on the Settings page, under Advanced); the API streams an upload to disk and converts it with DuckDB, so memory stays modest but a large file takes longer to import. Deleting the source deletes its files.
+
 When adding the source, choose what may be sent to the LLM to write descriptions:
 
 | Policy | Sent to the LLM |

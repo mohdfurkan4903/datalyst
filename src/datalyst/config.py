@@ -100,6 +100,9 @@ class Settings(BaseModel):
     sync_poll_interval_seconds: float = Field(default=2.0, gt=0)
     sync_lease_seconds: int = Field(default=900, ge=60)
 
+    files_dir: str = "data/files"
+    files_max_upload_mb: int = Field(default=200, ge=1)
+
     auth_token_minutes: int = Field(default=480, ge=5)
 
     def describe_settings(self) -> "Settings":
@@ -184,6 +187,7 @@ SECTIONS: dict[str, str] = {
     "retrieval": "Choosing the tables a question needs",
     "query": "Running queries on data sources",
     "sync": "Background worker",
+    "files": "Uploaded files",
     "auth": "Sign-in",
 }
 
@@ -279,6 +283,12 @@ OPTIONS: tuple[Option, ...] = (
         "lease_seconds",
         "A job held longer than this by a stopped worker is retried.",
     ),
+    Option(
+        "files",
+        "dir",
+        "Folder where uploaded CSV files are kept. The API and every worker must see the same folder.",
+    ),
+    Option("files", "max_upload_mb", "Largest file that can be uploaded."),
     Option("auth", "token_minutes", "How long a sign-in lasts."),
 )
 OPTIONS_BY_NAME: dict[str, Option] = {option.name: option for option in OPTIONS}
