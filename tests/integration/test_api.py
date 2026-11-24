@@ -346,7 +346,7 @@ def test_glossary(api, admin, analyst, shop):
     )
 
 
-def test_password_change_and_deactivation_end_sessions(api, admin, analyst):
+def test_password_change_and_blocking_end_sessions(api, admin, analyst):
     changed = api.post(
         "/api/auth/password",
         headers=analyst,
@@ -359,9 +359,10 @@ def test_password_change_and_deactivation_end_sessions(api, admin, analyst):
     assert api.get("/api/auth/me", headers=analyst).status_code == 401
 
     fresh = login(api, "analyst@example.com", "brand-new-password")
-    api.patch(
+    blocked = api.patch(
         f"/api/users/{user_id(api, admin)}", headers=admin, json={"active": False}
     )
+    assert blocked.json()["active"] is False
     assert api.get("/api/auth/me", headers=fresh).status_code == 401
     assert (
         api.post(
@@ -370,6 +371,61 @@ def test_password_change_and_deactivation_end_sessions(api, admin, analyst):
         ).status_code
         == 401
     )
+
+    api.patch(f"/api/users/{user_id(api, admin)}", headers=admin, json={"active": True})
+    assert login(api, "analyst@example.com", "brand-new-password")
+
+
+def test_admins_remove_users(api, admin, analyst):
+    removed = api.delete(f"/api/users/{user_id(api, admin)}", headers=admin)
+
+    assert removed.status_code == 204
+    assert api.get("/api/auth/me", headers=analyst).status_code == 401
+    assert [u["email"] for u in api.get("/api/users", headers=admin).json()] == [
+        "admin@example.com"
+    ]
+
+
+def test_admins_cannot_block_themselves(api, admin):
+    me = user_id(api, admin, "admin@example.com")
+
+    response = api.patch(f"/api/users/{me}", headers=admin, json={"active": False})
+
+    assert response.status_code == 400
+    assert "yourself" in response.json()["error"]["message"]
+
+
+def test_users_cannot_change_anything_admins_manage(api, analyst, shop):
+    """Every endpoint that changes shared state is refused for non-admins."""
+    allowed = {
+        ("POST", "/api/auth/login"),
+        ("POST", "/api/auth/setup"),
+        ("POST", "/api/auth/password"),
+        ("POST", "/api/sources/{source_id}/ask"),
+        ("POST", "/api/sources/{source_id}/query"),
+        ("POST", "/api/history/{entry_id}/feedback"),
+    }
+    checked = 0
+    for route_path, operations in api.app.openapi()["paths"].items():
+        for method in {m.upper() for m in operations} - {"GET", "HEAD"}:
+            if (method, route_path) in allowed:
+                continue
+            path = route_path
+            for name, value in {
+                "source_id": shop,
+                "user_id": 1,
+                "entry_id": 1,
+                "example_id": 1,
+                "relationship_id": 1,
+                "term": "x",
+                "table": "public.orders",
+                "column": "id",
+            }.items():
+                path = path.replace("{" + name + "}", str(value))
+            response = api.request(method, path, headers=analyst, json={})
+            assert response.status_code == 403, (method, route_path, response.text)
+            checked += 1
+    assert checked >= 15
 
 
 def test_the_last_admin_is_protected(api, admin):

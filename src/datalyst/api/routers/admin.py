@@ -24,6 +24,12 @@ def create_user(body: UserCreate, _: Admin, app: Services) -> User:
 @router.patch("/users/{user_id}")
 def update_user(user_id: int, body: UserUpdate, admin: Admin, app: Services) -> User:
     target = app.metastore.users.get(user_id)
+    if target.id == admin.user.id and (
+        body.active is False or body.role == Role.ANALYST
+    ):
+        raise ConfigurationError(
+            "You cannot block yourself or remove your own admin role."
+        )
     losing_admin = (
         target.role == Role.ADMIN
         and target.active
