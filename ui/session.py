@@ -123,21 +123,36 @@ def succeeded(action: Callable[[], Any], success: str | None = None) -> bool:
     return outcome is not None
 
 
+def source_label(source: dict) -> str:
+    """How a source is named on screen: the personal upload source reads nicely."""
+    me = current_user().get("id")
+    if source["kind"] == "files" and source["name"] == f"uploads-{me}":
+        return "📎 My uploads"
+    return source["name"]
+
+
 def pick_source(key: str = "source") -> dict | None:
     sources = call(client().sources) or []
     if not sources:
         st.info(
             "No data sources available yet."
             + (
-                " Add one under Data sources."
+                " Add one under Data sources, or attach a CSV or Excel file below with +."
                 if is_admin()
-                else " Upload your own files under My files, or ask an admin for access."
+                else " Attach a CSV or Excel file below with +, or ask an admin for access."
             )
         )
         return None
     names = [s["name"] for s in sources]
-    remembered = st.session_state.get("active_source")
-    index = names.index(remembered) if remembered in names else 0
-    chosen = st.selectbox("Data source", names, index=index, key=key)
+    labels = {s["name"]: source_label(s) for s in sources}
+    if st.session_state.get(key) not in names:
+        st.session_state.pop(key, None)
+    options = {}
+    if key not in st.session_state:
+        remembered = st.session_state.get("active_source")
+        options["index"] = names.index(remembered) if remembered in names else 0
+    chosen = st.selectbox(
+        "Data source", names, key=key, format_func=labels.get, **options
+    )
     st.session_state.active_source = chosen
     return next(s for s in sources if s["name"] == chosen)

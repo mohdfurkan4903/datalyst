@@ -1,6 +1,6 @@
 import streamlit as st
 
-from ui.session import call, client, current_user, succeeded
+from ui.session import call, client, current_user, source_label, succeeded
 from ui.views.sources import STATUS, files_panel, upload_form
 
 
@@ -18,7 +18,7 @@ def render() -> None:
     ]
     for source in mine:
         status = STATUS.get(source["status"], source["status"])
-        with st.expander(f"{source['name']} · {status}", expanded=len(mine) == 1):
+        with st.expander(f"{source_label(source)} · {status}", expanded=len(mine) == 1):
             _manage(source)
     with st.expander("Upload new files", expanded=not mine):
         upload_form()

@@ -7,20 +7,39 @@ SUGGESTIONS_SHOWN = 3
 NEW_CHAT = None
 
 
+FILE_TYPES = ["csv", "tsv", "txt", "xlsx", "xlsm"]
+INPUT_HINT = "Ask a question about your data, or attach CSV and Excel files with +"
+
+
 def render() -> None:
     st.title("Ask")
+    # A source can only be chosen before the picker is drawn.
+    if "switch_source" in st.session_state:
+        st.session_state["ask-source"] = st.session_state.pop("switch_source")
     source = pick_source("ask-source")
-    if source is None:
-        return
-    state = _state(source["id"])
-    _chat_bar(source["id"], state)
+    state = _state(source["id"]) if source else None
+    if source and state is not None:
+        _show_chat(source, state)
 
-    toolbar = st.columns([4, 1])
-    toolbar[0].caption(
+    pending = st.session_state.pop("pending_question", None)
+    entry = st.chat_input(INPUT_HINT, accept_file="multiple", file_type=FILE_TYPES)
+    text = (entry.text if entry else None) or pending
+    files = list(entry.files) if entry else []
+    if files:
+        _attach(source, state, files, text)
+    elif text:
+        if source is None or state is None:
+            st.info("Attach a CSV or Excel file with + to get started.")
+            return
+        _ask(source, state, text)
+
+
+def _show_chat(source: dict, state: dict) -> None:
+    _chat_bar(source["id"], state)
+    st.caption(
         "Ask in plain English. Datalyst writes a read-only query, runs it and shows "
         "the result. Follow-up questions build on this chat."
     )
-
     if not state["past"] and not state["messages"]:
         _suggestions(source["id"])
 
@@ -28,27 +47,62 @@ def render() -> None:
         _past_entry(entry)
     for index, message in enumerate(state["messages"]):
         with st.chat_message(message["role"]):
-            if message["role"] == "user":
+            if message.get("files"):
+                st.markdown("📎 " + ", ".join(message["files"]))
+            elif message["role"] == "user":
                 st.markdown(message["text"])
+            elif message.get("upload"):
+                _show_upload(message["upload"])
             else:
                 show_answer(message["answer"], f"{source['id']}-{index}")
 
-    pending = st.session_state.pop("pending_question", None)
-    question = st.chat_input("Ask a question about your data") or pending
-    if question:
-        state["messages"].append({"role": "user", "text": question})
-        with st.chat_message("user"):
-            st.markdown(question)
-        with st.chat_message("assistant"), st.spinner("Working on it…"):
-            answer = call(
-                lambda: client().ask(source["id"], question, state["conversation"])
-            )
-        if answer is not None:
-            state["messages"].append({"role": "assistant", "answer": answer})
-            if answer.get("conversation_id"):
-                state["conversation"] = answer["conversation_id"]
-                state["select"] = answer["conversation_id"]
-        st.rerun()
+
+def _ask(source: dict, state: dict, question: str) -> None:
+    state["messages"].append({"role": "user", "text": question})
+    with st.chat_message("user"):
+        st.markdown(question)
+    with st.chat_message("assistant"), st.spinner("Working on it…"):
+        answer = call(
+            lambda: client().ask(source["id"], question, state["conversation"])
+        )
+    if answer is not None:
+        state["messages"].append({"role": "assistant", "answer": answer})
+        if answer.get("conversation_id"):
+            state["conversation"] = answer["conversation_id"]
+            state["select"] = answer["conversation_id"]
+    st.rerun()
+
+
+def _attach(source: dict | None, state: dict | None, files: list, text: str | None):
+    """Files attached with +: they join the user's personal source, and the chat
+    moves there so the question can be asked right away."""
+    with st.chat_message("assistant"), st.spinner("Reading your files…"):
+        result = call(
+            lambda: client().attach_files([(f.name, f.getvalue()) for f in files])
+        )
+    if result is None:
+        return
+    personal = result["source"]
+    if source is None or personal["id"] != source["id"]:
+        st.session_state["switch_source"] = personal["name"]
+        state = _state(personal["id"])
+        state.update(conversation=NEW_CHAT, past=[], messages=[], select=NEW_CHAT)
+    state["messages"].append({"role": "user", "files": [f.name for f in files]})
+    state["messages"].append({"role": "assistant", "upload": result["tables"]})
+    if text:
+        st.session_state.pending_question = text
+    st.rerun()
+
+
+def _show_upload(tables: list[dict]) -> None:
+    for table in tables:
+        verb = "Updated" if table["replaced"] else "Added"
+        columns = ", ".join(table["columns"][:8])
+        more = "…" if len(table["columns"]) > 8 else ""
+        st.markdown(
+            f"{verb} **{table['table']}**: {table['rows']:,} rows ({columns}{more})"
+        )
+    st.caption("Ask anything about them. Attach more files with + to combine them.")
 
 
 def _state(source_id: int) -> dict:

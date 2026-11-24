@@ -827,6 +827,94 @@ def test_user_uploads_have_a_limit_and_an_off_switch(api, admin, analyst):
     assert upload(api, admin, "admin-four").status_code == 201
 
 
+def attach(api, headers, *files):
+    return api.post(
+        "/api/sources/personal/files",
+        headers=headers,
+        files=[("files", (name, content, "text/csv")) for name, content in files],
+    )
+
+
+CUSTOMERS_CSV = b"Customer ID,Name\n1,Ann\n2,Bob\n"
+
+
+def test_files_attached_in_a_chat_go_to_a_private_personal_source(
+    api, admin, analyst, other, replies
+):
+    first = attach(api, analyst, ("orders.csv", ORDERS_CSV))
+    assert first.status_code == 201, first.text
+    source = first.json()["source"]
+    assert source["name"] == f"uploads-{user_id(api, admin)}"
+    assert source["open_to_all"] is False and source["kind"] == "files"
+    assert [t["table"] for t in first.json()["tables"]] == ["orders"]
+
+    # More attachments join the same source, so files can be combined.
+    second = attach(api, analyst, ("customers.csv", CUSTOMERS_CSV))
+    assert second.json()["source"]["id"] == source["id"]
+    tables = api.get(f"/api/sources/{source['id']}/files", headers=analyst).json()
+    assert [t["table"] for t in tables] == ["customers", "orders"]
+
+    # They can be asked about straight away, by their owner only.
+    replies(sql_reply("SELECT SUM(total) AS spent FROM main.orders"))
+    assert ask(api, analyst, source["id"], "Total spend?")["result"]["rows"] == [
+        [37.75]
+    ]
+    assert api.get("/api/sources", headers=other).json() == []
+    assert (
+        api.post(
+            f"/api/sources/{source['id']}/ask", headers=other, json={"question": "hi"}
+        ).status_code
+        == 403
+    )
+    # An admin's attachments are private too, until they share them.
+    mine = attach(api, admin, ("orders.csv", ORDERS_CSV)).json()["source"]
+    assert mine["open_to_all"] is False
+    assert api.get("/api/sources", headers=other).json() == []
+
+
+def test_a_failed_attachment_leaves_nothing_behind(api, analyst, files_dir):
+    for name, content, message in (
+        ("empty.csv", b"a,b\n", "no data rows"),
+        ("notes.pdf", b"%PDF", "Cannot read"),
+    ):
+        response = attach(api, analyst, (name, content))
+        assert response.status_code == 400, response.text
+        assert message in response.json()["error"]["message"]
+    assert api.get("/api/sources", headers=analyst).json() == []
+    assert not files_dir.exists() or list(files_dir.iterdir()) == []
+
+    # Something already attached survives a later bad file.
+    assert attach(api, analyst, ("orders.csv", ORDERS_CSV)).status_code == 201
+    assert (
+        attach(
+            api, analyst, ("customers.csv", CUSTOMERS_CSV), ("bad.pdf", b"%PDF")
+        ).status_code
+        == 400
+    )
+    assert len(api.get("/api/sources", headers=analyst).json()) == 1
+
+
+def test_attaching_follows_the_upload_rules_but_not_the_source_cap(api, admin, analyst):
+    assert upload(api, analyst, "one").status_code == 201
+    assert upload(api, analyst, "two").status_code == 201
+    assert upload(api, analyst, "three").status_code == 400
+
+    assert attach(api, analyst, ("orders.csv", ORDERS_CSV)).status_code == 201
+    too_many = attach(api, analyst, *[(f"f{i}.csv", ORDERS_CSV) for i in range(11)])
+    assert (
+        too_many.status_code == 400
+        and "up to 10" in too_many.json()["error"]["message"]
+    )
+    big = attach(api, analyst, ("big.csv", b"a,b\n" + b"1,2\n" * 400_000))
+    assert big.status_code == 400 and "larger than" in big.json()["error"]["message"]
+
+    api.put(
+        "/api/settings", headers=admin, json={"values": {"files.user_uploads": False}}
+    )
+    assert attach(api, analyst, ("orders.csv", ORDERS_CSV)).status_code == 403
+    assert attach(api, admin, ("orders.csv", ORDERS_CSV)).status_code == 201
+
+
 def test_an_admins_upload_is_open_to_everyone(api, admin, analyst):
     shared = upload(api, admin, "team-data").json()
 
@@ -1039,6 +1127,7 @@ def test_users_cannot_change_anything_admins_manage(api, analyst, shop):
         ("POST", "/api/history/{entry_id}/feedback"),
         # Users upload and manage their own files; ownership is checked inside.
         ("POST", "/api/sources/upload"),
+        ("POST", "/api/sources/personal/files"),
         # A user's own chats and memories.
         ("DELETE", "/api/conversations/{conversation_id}"),
         ("POST", "/api/memories"),

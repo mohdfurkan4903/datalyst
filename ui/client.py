@@ -73,6 +73,14 @@ class DatalystClient:
             files={"file": (filename, content)},
         )
 
+    def attach_files(self, files: list[tuple[str, bytes]]) -> dict:
+        """Files attached in a chat; they go to the user's personal source."""
+        return self._call(
+            "POST",
+            "/api/sources/personal/files",
+            files=[("files", (name, content)) for name, content in files],
+        )
+
     def source_files(self, source_id: int) -> list[dict]:
         return self._call("GET", f"/api/sources/{source_id}/files")
 

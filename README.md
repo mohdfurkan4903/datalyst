@@ -97,7 +97,7 @@ Any other OpenAI-compatible server works with `openai` plus a base URL. Backgrou
 
 Everyone sees:
 
-- **Ask:** chat with a data source; each answer shows the result table, an automatic chart (line for time series, bar for categories, a single number as a metric), the SQL, and 👍/👎 feedback. Results download as CSV. Admins can save a good answer as a verified example that similar questions reuse.
+- **Ask:** chat with a data source, or attach CSV and Excel files with the **+** button and ask about them straight away; each answer shows the result table, an automatic chart (line for time series, bar for categories, a single number as a metric), the SQL, and 👍/👎 feedback. Results download as CSV. Admins can save a good answer as a verified example that similar questions reuse.
 - **History:** past questions with their status and SQL.
 - **Memory:** what Datalyst remembers about you; add or forget items.
 
@@ -139,6 +139,8 @@ Admins can switch memory off (`memory.enabled`) or stop the assistant from savin
 ## Uploaded files
 
 Everyone can upload CSV files (`.csv`, `.tsv`, `.txt`) and Excel workbooks (`.xlsx`, `.xlsm`). Admins do it on the Data sources page; other users on their own My files page. Each CSV file becomes a table named after the file, so several files in one source can be joined. A workbook with one sheet is named after the file; a workbook with several sheets gives one table per sheet, named after the sheet (hidden and empty sheets are skipped). Datalyst reads the types once (numbers, dates, text, yes/no), cleans the column names, keeps the data as Parquet in the folder set by `files.dir` and answers questions with DuckDB. Uploading a file with the same name replaces that table.
+
+In the chat, the **+** button next to the question box attaches CSV or Excel files, as in ChatGPT or Claude: the files are read at once and can be asked about in the same message. They go to the user's personal source (shown as "My uploads"), which is made the first time; attaching more files adds tables to it, so files can be combined. It does not count toward the per-user source limit, but it follows the upload on/off switch and the file size limit.
 
 A user's upload is private: only that user and the admins can see or use it, and the user can add, replace and remove its files or delete it, but cannot share it or change anything else. An admin can share it with others from the Data sources page. An admin's own upload is open to everyone by default. Admins can turn user uploads off (`files.user_uploads`) or limit how many uploaded sources one user can have (`files.max_user_sources`, 10 by default) on the Settings page, under Advanced. Removing a user deletes their private uploads.
 
